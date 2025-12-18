@@ -1,4 +1,125 @@
 .calendar-day-view {
-    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Day Header */
+.day-header {
+    padding: 1rem;
+    background: var(--lwc-colorBackgroundAlt, #fafaf9);
+    border-bottom: 2px solid var(--lwc-colorBorder, #dddbda);
     text-align: center;
+}
+
+.day-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--lwc-colorTextDefault, #181818);
+    margin: 0 0 0.5rem 0;
+}
+
+.day-date {
+    font-size: 0.875rem;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+}
+
+/* All-Day Section */
+.allday-section {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--lwc-colorBorder, #dddbda);
+    background: var(--lwc-colorBackgroundRowNew, #ecf9ff);
+}
+
+.allday-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+    padding: 0.5rem;
+}
+
+.allday-events {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+/* Timeline */
+.day-timeline {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.hour-row {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    border-bottom: 1px solid var(--lwc-colorBorder, #dddbda);
+    min-height: 60px;
+}
+
+.hour-label {
+    padding: 0.5rem;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+    background: var(--lwc-colorBackgroundAlt, #fafaf9);
+}
+
+.hour-events {
+    padding: 0.25rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.hour-events:hover {
+    background: var(--lwc-colorBackgroundRowHover, #f3f2f2);
+}
+
+/* Events */
+.day-event {
+    padding: 0.5rem;
+    margin-bottom: 0.25rem;
+    background: var(--lwc-brandBackgroundDark, #0176d3);
+    color: #ffffff;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.day-event:hover {
+    opacity: 0.8;
+}
+
+.event-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.event-time {
+    font-size: 0.75rem;
+    opacity: 0.9;
+}
+
+/* Event Color Classes */
+.day-event.event-blue {
+    background: #0176d3;
+}
+
+.day-event.event-green {
+    background: #027e46;
+}
+
+.day-event.event-orange {
+    background: #fe9339;
+}
+
+.day-event.event-red {
+    background: #ea001e;
+}
+
+.day-event.event-purple {
+    background: #8b45c9;
 }

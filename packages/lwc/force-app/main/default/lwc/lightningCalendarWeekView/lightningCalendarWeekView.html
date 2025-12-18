@@ -1,8 +1,54 @@
 <template>
     <div class="calendar-week-view">
-        <div class="week-view-placeholder">
-            <p>Week View - Coming Soon</p>
-            <p>Week {viewData.weekNumber}</p>
+        <!-- Day Headers -->
+        <div class="week-header">
+            <div class="time-gutter"></div>
+            <div class="week-days">
+                <template for:each={dayHeaders} for:item="day">
+                    <div key={day.date} class={day.headerClass}>
+                        <div class="day-name">{day.dayName}</div>
+                        <div class="day-number">{day.dayNumber}</div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Time Grid -->
+        <div class="week-time-grid">
+            <template for:each={hours} for:item="hourSlot">
+                <div key={hourSlot.hour} class="time-row">
+                    <!-- Time Label -->
+                    <div class="time-label">{hourSlot.label}</div>
+
+                    <!-- Day Columns -->
+                    <div class="time-cells">
+                        <template for:each={hourSlot.days} for:item="daySlot">
+                            <div
+                                key={daySlot.date}
+                                class="time-cell"
+                                data-date={daySlot.date}
+                                data-hour={daySlot.hour}
+                                onclick={handleTimeSlotClick}
+                            >
+                                <!-- Events in this time slot -->
+                                <template if:true={daySlot.events}>
+                                    <template for:each={daySlot.events} for:item="event">
+                                        <div
+                                            key={event.id}
+                                            class={event.classes}
+                                            data-event-id={event.id}
+                                            onclick={handleEventClick}
+                                            title={event.title}
+                                        >
+                                            {event.title}
+                                        </div>
+                                    </template>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
         </div>
     </div>
 </template>

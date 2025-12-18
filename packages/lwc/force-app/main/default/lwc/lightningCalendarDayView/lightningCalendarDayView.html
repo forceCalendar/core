@@ -1,8 +1,59 @@
 <template>
     <div class="calendar-day-view">
-        <div class="day-view-placeholder">
-            <p>Day View - Coming Soon</p>
-            <p>{viewData.dayName}</p>
+        <!-- Day Header -->
+        <div class="day-header">
+            <h3 class="day-title">{dayTitle}</h3>
+            <div class="day-date">{dateDisplay}</div>
+        </div>
+
+        <!-- All-Day Events Section -->
+        <template if:true={hasAllDayEvents}>
+            <div class="allday-section">
+                <div class="allday-label">All Day</div>
+                <div class="allday-events">
+                    <template for:each={allDayEvents} for:item="event">
+                        <div
+                            key={event.id}
+                            class={event.classes}
+                            data-event-id={event.id}
+                            onclick={handleEventClick}
+                        >
+                            {event.title}
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <!-- Timeline -->
+        <div class="day-timeline">
+            <template for:each={hours} for:item="hourSlot">
+                <div key={hourSlot.hour} class="hour-row">
+                    <!-- Time Label -->
+                    <div class="hour-label">{hourSlot.time}</div>
+
+                    <!-- Events Container -->
+                    <div
+                        class="hour-events"
+                        data-hour={hourSlot.hour}
+                        onclick={handleTimeSlotClick}
+                    >
+                        <template if:true={hourSlot.events}>
+                            <template for:each={hourSlot.events} for:item="event">
+                                <div
+                                    key={event.id}
+                                    class={event.classes}
+                                    data-event-id={event.id}
+                                    onclick={handleEventClick}
+                                >
+                                    <div class="event-title">{event.title}</div>
+                                    <div class="event-time">{event.timeDisplay}</div>
+                                </div>
+                            </template>
+                        </template>
+                    </div>
+                </div>
+            </template>
         </div>
     </div>
 </template>

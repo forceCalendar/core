@@ -1,4 +1,151 @@
 .calendar-list-view {
-    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Summary */
+.list-summary {
+    padding: 1rem;
+    background: var(--lwc-colorBackgroundAlt, #fafaf9);
+    border-bottom: 2px solid var(--lwc-colorBorder, #dddbda);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+}
+
+/* Days List */
+.list-days {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.list-day {
+    margin-bottom: 1.5rem;
+}
+
+/* Day Header */
+.list-day-header {
+    padding: 0.75rem 1rem;
+    background: var(--lwc-colorBackgroundAlt, #fafaf9);
+    border-left: 4px solid var(--lwc-brandBackgroundDark, #0176d3);
+    margin-bottom: 0.5rem;
+}
+
+.list-day-header.today {
+    background: var(--lwc-brandBackgroundPrimary, #e8f4f9);
+    border-left-color: var(--lwc-brandTextLink, #0176d3);
+}
+
+.day-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--lwc-colorTextDefault, #181818);
+    margin-bottom: 0.25rem;
+}
+
+.day-date {
+    font-size: 0.875rem;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+}
+
+/* Events */
+.list-events {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.list-event {
+    display: grid;
+    grid-template-columns: 4px 1fr;
+    background: var(--lwc-colorBackground, #ffffff);
+    border: 1px solid var(--lwc-colorBorder, #dddbda);
+    border-radius: 0.25rem;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.list-event:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.event-color-bar {
+    background: var(--lwc-brandBackgroundDark, #0176d3);
+}
+
+/* Color variations */
+.list-event.event-blue .event-color-bar {
+    background: #0176d3;
+}
+
+.list-event.event-green .event-color-bar {
+    background: #027e46;
+}
+
+.list-event.event-orange .event-color-bar {
+    background: #fe9339;
+}
+
+.list-event.event-red .event-color-bar {
+    background: #ea001e;
+}
+
+.list-event.event-purple .event-color-bar {
+    background: #8b45c9;
+}
+
+.event-content {
+    padding: 0.75rem 1rem;
+}
+
+.event-time {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+    margin-bottom: 0.25rem;
+}
+
+.event-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--lwc-colorTextDefault, #181818);
+    margin-bottom: 0.5rem;
+}
+
+.event-location {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+    margin-bottom: 0.25rem;
+}
+
+.event-description {
+    font-size: 0.875rem;
+    color: var(--lwc-colorTextDefault, #181818);
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--lwc-colorBorder, #dddbda);
+}
+
+/* Empty State */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
     text-align: center;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+}
+
+.empty-state p {
+    margin-top: 1rem;
+    font-size: 1rem;
 }

@@ -1,8 +1,56 @@
 <template>
     <div class="calendar-list-view">
-        <div class="list-view-placeholder">
-            <p>List View - Coming Soon</p>
-            <p>{viewData.totalEvents} events</p>
+        <!-- Summary Header -->
+        <div class="list-summary">
+            {totalEventsText}
         </div>
+
+        <!-- Days List -->
+        <div class="list-days">
+            <template for:each={days} for:item="day">
+                <div key={day.date} class="list-day">
+                    <!-- Day Header -->
+                    <div class={day.dayHeaderClass}>
+                        <div class="day-name">{day.dayName}</div>
+                        <div class="day-date">{day.formattedDate}</div>
+                    </div>
+
+                    <!-- Events for this day -->
+                    <div class="list-events">
+                        <template for:each={day.events} for:item="event">
+                            <div
+                                key={event.id}
+                                class={event.classes}
+                                data-event-id={event.id}
+                                onclick={handleEventClick}
+                            >
+                                <div class="event-color-bar"></div>
+                                <div class="event-content">
+                                    <div class="event-time">{event.timeDisplay}</div>
+                                    <div class="event-title">{event.title}</div>
+                                    <template if:true={event.hasLocation}>
+                                        <div class="event-location">
+                                            <lightning-icon icon-name="utility:location" size="xx-small"></lightning-icon>
+                                            {event.location}
+                                        </div>
+                                    </template>
+                                    <template if:true={event.description}>
+                                        <div class="event-description">{event.description}</div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Empty State -->
+        <template if:false={days.length}>
+            <div class="empty-state">
+                <lightning-icon icon-name="utility:event" size="large"></lightning-icon>
+                <p>No upcoming events</p>
+            </div>
+        </template>
     </div>
 </template>

@@ -1,4 +1,129 @@
 .calendar-week-view {
-    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Week Header */
+.week-header {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    border-bottom: 2px solid var(--lwc-colorBorder, #dddbda);
+    background: var(--lwc-colorBackgroundAlt, #fafaf9);
+}
+
+.time-gutter {
+    /* Empty space above time labels */
+}
+
+.week-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+}
+
+.week-days > div {
+    padding: 0.5rem;
     text-align: center;
+    border-left: 1px solid var(--lwc-colorBorder, #dddbda);
+}
+
+.week-days > div:first-child {
+    border-left: none;
+}
+
+.day-name {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+    text-transform: uppercase;
+}
+
+.day-number {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--lwc-colorTextDefault, #181818);
+    margin-top: 0.25rem;
+}
+
+/* Time Grid */
+.week-time-grid {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.time-row {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    border-bottom: 1px solid var(--lwc-colorBorder, #dddbda);
+    min-height: 48px;
+}
+
+.time-label {
+    padding: 0.25rem 0.5rem;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--lwc-colorTextLabel, #3e3e3c);
+    background: var(--lwc-colorBackgroundAlt, #fafaf9);
+}
+
+.time-cells {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+}
+
+.time-cell {
+    border-left: 1px solid var(--lwc-colorBorder, #dddbda);
+    padding: 0.125rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    position: relative;
+}
+
+.time-cell:hover {
+    background: var(--lwc-colorBackgroundRowHover, #f3f2f2);
+}
+
+.time-cell:first-child {
+    border-left: none;
+}
+
+/* Events */
+.week-event {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.25rem;
+    background: var(--lwc-brandBackgroundDark, #0176d3);
+    color: #ffffff;
+    border-radius: 0.125rem;
+    cursor: pointer;
+    margin-bottom: 0.125rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity 0.2s;
+}
+
+.week-event:hover {
+    opacity: 0.8;
+}
+
+/* Event Color Classes */
+.week-event.event-blue {
+    background: #0176d3;
+}
+
+.week-event.event-green {
+    background: #027e46;
+}
+
+.week-event.event-orange {
+    background: #fe9339;
+}
+
+.week-event.event-red {
+    background: #ea001e;
+}
+
+.week-event.event-purple {
+    background: #8b45c9;
 }
