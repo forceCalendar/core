@@ -11,6 +11,9 @@ export class VanillaDOMRenderer {
     this.container = container;
     this.calendar = calendar;
 
+    // View settings
+    this.show30MinIntervals = false; // Default to 60-minute intervals
+
     // Bind methods for event listeners
     this.handleEventClick = this.handleEventClick.bind(this);
     this.handleDateClick = this.handleDateClick.bind(this);
@@ -268,6 +271,23 @@ export class VanillaDOMRenderer {
   renderWeekView(viewData) {
     const weekGrid = this.createElement('div', 'calendar-week-grid');
 
+    // Time interval toggle (30min or 60min)
+    const timeIntervalToggle = this.createElement('div', 'time-interval-toggle');
+    timeIntervalToggle.innerHTML = `
+      <label style="display: flex; align-items: center; gap: 8px; padding: 12px; background: var(--gray-50); border-bottom: 1px solid var(--border-color);">
+        <input type="checkbox" id="show-30min-intervals" ${this.show30MinIntervals ? 'checked' : ''}>
+        <span style="font-size: 14px; color: var(--gray-700);">Show 30-minute intervals</span>
+      </label>
+    `;
+    weekGrid.appendChild(timeIntervalToggle);
+
+    // Listen for toggle changes
+    const checkbox = timeIntervalToggle.querySelector('#show-30min-intervals');
+    checkbox.addEventListener('change', (e) => {
+      this.show30MinIntervals = e.target.checked;
+      this.render();
+    });
+
     // Day headers
     const dayHeaders = this.createElement('div', 'calendar-week-headers');
 
@@ -289,47 +309,96 @@ export class VanillaDOMRenderer {
     // Time slots
     const timeGrid = this.createElement('div', 'calendar-time-grid');
 
-    // Generate hourly slots
+    // Generate time slots (either 30min or 60min intervals)
+    const intervalMinutes = this.show30MinIntervals ? 30 : 60;
+    const slotsPerHour = 60 / intervalMinutes;
+
     for (let hour = 0; hour < 24; hour++) {
-      const timeRow = this.createElement('div', 'calendar-time-row');
+      for (let slot = 0; slot < slotsPerHour; slot++) {
+        const minute = slot * intervalMinutes;
+        const timeRow = this.createElement('div', 'calendar-time-row');
 
-      // Time label
-      const timeLabel = this.createElement('div', 'calendar-time-label');
-      const hourDisplay = hour === 0 ? '12 AM' :
-                         hour < 12 ? `${hour} AM` :
-                         hour === 12 ? '12 PM' :
-                         `${hour - 12} PM`;
-      timeLabel.textContent = hourDisplay;
-      timeRow.appendChild(timeLabel);
+        // Only show time label for the first slot of each hour
+        if (slot === 0 || this.show30MinIntervals) {
+          const timeLabel = this.createElement('div', 'calendar-time-label');
+          let hourDisplay = hour === 0 ? '12' :
+                           hour < 12 ? `${hour}` :
+                           hour === 12 ? '12' :
+                           `${hour - 12}`;
+          const period = hour < 12 ? 'AM' : 'PM';
 
-      // Day cells
-      viewData.days.forEach(day => {
-        const timeCell = this.createElement('div', 'calendar-time-cell');
-        timeCell.setAttribute('data-date', day.date.toISOString());
-        timeCell.setAttribute('data-hour', hour);
-
-        // Add events for this hour
-        const hourEvents = day.events.filter(event => {
-          if (event.allDay) return false;
-          return event.start.getHours() === hour;
-        });
-
-        hourEvents.forEach(event => {
-          const eventEl = this.createElement('div', 'calendar-week-event');
-          eventEl.textContent = event.title;
-          eventEl.setAttribute('data-event-id', event.id);
-
-          if (event.backgroundColor) {
-            eventEl.style.backgroundColor = event.backgroundColor;
+          if (minute === 0) {
+            timeLabel.textContent = `${hourDisplay}:00 ${period}`;
+          } else {
+            timeLabel.textContent = `${hourDisplay}:30 ${period}`;
+            timeLabel.style.fontSize = '11px';
+            timeLabel.style.color = 'var(--gray-500)';
           }
+          timeRow.appendChild(timeLabel);
+        } else {
+          const timeLabel = this.createElement('div', 'calendar-time-label');
+          timeRow.appendChild(timeLabel);
+        }
 
-          timeCell.appendChild(eventEl);
+        // Day cells
+        viewData.days.forEach(day => {
+          const timeCell = this.createElement('div', 'calendar-time-cell');
+          timeCell.setAttribute('data-date', day.date.toISOString());
+          timeCell.setAttribute('data-hour', hour);
+          timeCell.setAttribute('data-minute', minute);
+
+          // Add events for this time slot
+          const slotEvents = day.events.filter(event => {
+            if (event.allDay) return false;
+            const eventHour = event.start.getHours();
+            const eventMinute = event.start.getMinutes();
+
+            // Event starts in this time slot
+            if (this.show30MinIntervals) {
+              return eventHour === hour && Math.floor(eventMinute / 30) === slot;
+            } else {
+              return eventHour === hour;
+            }
+          });
+
+          slotEvents.forEach(event => {
+            const eventEl = this.createElement('div', 'calendar-week-event');
+            eventEl.textContent = event.title;
+            eventEl.setAttribute('data-event-id', event.id);
+
+            // Calculate event height based on duration
+            const durationMinutes = (event.end - event.start) / (1000 * 60);
+            const durationSlots = durationMinutes / intervalMinutes;
+
+            // Position event to span multiple slots if needed
+            if (durationSlots > 1) {
+              const heightPercentage = (durationSlots * 100);
+              eventEl.style.height = `calc(${heightPercentage}% - 4px)`;
+            }
+
+            if (event.metadata && event.metadata.colorClass) {
+              // Apply color from metadata
+              const colorMap = {
+                'event-blue': '#1e88e5',
+                'event-green': '#43a047',
+                'event-orange': '#fb8c00',
+                'event-red': '#e53935',
+                'event-purple': '#8e24aa'
+              };
+              const color = colorMap[event.metadata.colorClass] || '#1e88e5';
+              eventEl.style.backgroundColor = color;
+            } else if (event.backgroundColor) {
+              eventEl.style.backgroundColor = event.backgroundColor;
+            }
+
+            timeCell.appendChild(eventEl);
+          });
+
+          timeRow.appendChild(timeCell);
         });
 
-        timeRow.appendChild(timeCell);
-      });
-
-      timeGrid.appendChild(timeRow);
+        timeGrid.appendChild(timeRow);
+      }
     }
 
     weekGrid.appendChild(timeGrid);

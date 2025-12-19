@@ -492,6 +492,11 @@ body {
   border-bottom: none;
 }
 
+/* 30-minute intervals have lighter borders */
+.calendar-time-row:nth-child(even) {
+  border-bottom-color: var(--gray-200);
+}
+
 .calendar-time-label {
   padding: var(--spacing-xs);
   font-size: var(--font-size-sm);
