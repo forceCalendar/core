@@ -36,7 +36,9 @@ export class DateUtils {
     const result = new Date(date);
     const day = result.getDay();
     const diff = (day < weekStartsOn ? 7 : 0) + day - weekStartsOn;
-    result.setDate(result.getDate() - diff);
+
+    // Use setTime to handle month/year boundaries correctly
+    result.setTime(result.getTime() - (diff * 24 * 60 * 60 * 1000));
     result.setHours(0, 0, 0, 0);
     return result;
   }
@@ -49,7 +51,8 @@ export class DateUtils {
    */
   static endOfWeek(date, weekStartsOn = 0) {
     const result = DateUtils.startOfWeek(date, weekStartsOn);
-    result.setDate(result.getDate() + 6);
+    // Use setTime to handle month/year boundaries correctly
+    result.setTime(result.getTime() + (6 * 24 * 60 * 60 * 1000));
     result.setHours(23, 59, 59, 999);
     return result;
   }
@@ -98,7 +101,8 @@ export class DateUtils {
    */
   static addDays(date, days) {
     const result = new Date(date);
-    result.setDate(result.getDate() + days);
+    // Use setTime to handle month/year boundaries correctly
+    result.setTime(result.getTime() + (days * 24 * 60 * 60 * 1000));
     return result;
   }
 
@@ -178,7 +182,9 @@ export class DateUtils {
    * @returns {boolean}
    */
   static isSameDay(date1, date2) {
-    return date1.toDateString() === date2.toDateString();
+    return date1.getFullYear() === date2.getFullYear() &&
+           date1.getMonth() === date2.getMonth() &&
+           date1.getDate() === date2.getDate();
   }
 
   /**
@@ -368,10 +374,12 @@ export class DateUtils {
   static getDateRange(start, end) {
     const dates = [];
     const current = new Date(start);
+    const endTime = end.getTime();
 
-    while (current <= end) {
+    while (current.getTime() <= endTime) {
       dates.push(new Date(current));
-      current.setDate(current.getDate() + 1);
+      // Use setTime to handle month/year boundaries correctly
+      current.setTime(current.getTime() + (24 * 60 * 60 * 1000));
     }
 
     return dates;
@@ -393,5 +401,129 @@ export class DateUtils {
    */
   static isValidDate(value) {
     return value instanceof Date && !isNaN(value.getTime());
+  }
+
+  /**
+   * Convert a date to a specific timezone
+   * @param {Date} date - The date to convert
+   * @param {string} timeZone - IANA timezone string (e.g., 'America/New_York')
+   * @returns {Date} - Date object adjusted for timezone
+   */
+  static toTimeZone(date, timeZone) {
+    // Get the date string in the target timezone
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+
+    const parts = formatter.formatToParts(date);
+    const dateObj = {};
+    parts.forEach(part => {
+      if (part.type !== 'literal') {
+        dateObj[part.type] = part.value;
+      }
+    });
+
+    // Create new date in the target timezone
+    return new Date(
+      `${dateObj.year}-${dateObj.month}-${dateObj.day}T${dateObj.hour}:${dateObj.minute}:${dateObj.second}`
+    );
+  }
+
+  /**
+   * Get timezone offset in minutes for a date
+   * @param {Date} date - The date
+   * @param {string} timeZone - IANA timezone string
+   * @returns {number} - Offset in minutes
+   */
+  static getTimezoneOffset(date, timeZone) {
+    const utcDate = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const tzDate = new Date(date.toLocaleString('en-US', { timeZone }));
+    return (utcDate.getTime() - tzDate.getTime()) / 60000;
+  }
+
+  /**
+   * Check if DST is in effect for a date in a timezone
+   * @param {Date} date - The date to check
+   * @param {string} timeZone - IANA timezone string
+   * @returns {boolean}
+   */
+  static isDST(date, timeZone) {
+    const jan = new Date(date.getFullYear(), 0, 1);
+    const jul = new Date(date.getFullYear(), 6, 1);
+    const janOffset = DateUtils.getTimezoneOffset(jan, timeZone);
+    const julOffset = DateUtils.getTimezoneOffset(jul, timeZone);
+    const currentOffset = DateUtils.getTimezoneOffset(date, timeZone);
+
+    return Math.max(janOffset, julOffset) === currentOffset;
+  }
+
+  /**
+   * Add time accounting for DST transitions
+   * @param {Date} date - The date
+   * @param {number} hours - Hours to add
+   * @param {string} timeZone - IANA timezone string
+   * @returns {Date}
+   */
+  static addHoursWithDST(date, hours, timeZone) {
+    const result = new Date(date);
+    const originalOffset = DateUtils.getTimezoneOffset(date, timeZone);
+
+    // Add hours
+    result.setTime(result.getTime() + (hours * 60 * 60 * 1000));
+
+    // Check if DST transition occurred
+    const newOffset = DateUtils.getTimezoneOffset(result, timeZone);
+    if (originalOffset !== newOffset) {
+      // Adjust for DST change
+      const dstAdjustment = (newOffset - originalOffset) * 60000;
+      result.setTime(result.getTime() + dstAdjustment);
+    }
+
+    return result;
+  }
+
+  /**
+   * Create a date in a specific timezone
+   * @param {number} year
+   * @param {number} month - 0-indexed
+   * @param {number} day
+   * @param {number} hour
+   * @param {number} minute
+   * @param {number} second
+   * @param {string} timeZone - IANA timezone string
+   * @returns {Date}
+   */
+  static createInTimeZone(year, month, day, hour = 0, minute = 0, second = 0, timeZone) {
+    // Create date string in ISO format
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
+
+    // Use Intl API to get the UTC time for this local time in the timezone
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+
+    // Parse the local date in the target timezone
+    const localDate = new Date(`${dateStr}T${timeStr}`);
+
+    // Get offset and adjust
+    const offset = DateUtils.getTimezoneOffset(localDate, timeZone);
+    const utcTime = localDate.getTime() + (offset * 60000);
+
+    return new Date(utcTime);
   }
 }

@@ -1,4 +1,5 @@
 import { Event } from './Event.js';
+import { DateUtils } from '../calendar/DateUtils.js';
 
 /**
  * EventStore - Manages calendar events with efficient querying
@@ -273,23 +274,20 @@ export class EventStore {
    */
   _indexEvent(event) {
     // Index by date(s)
-    const startDate = new Date(event.start);
-    const endDate = new Date(event.end);
+    const startDate = DateUtils.startOfDay(event.start);
+    const endDate = DateUtils.endOfDay(event.end);
 
     // For each day the event spans, add to date index
-    const currentDate = new Date(startDate);
-    currentDate.setHours(0, 0, 0, 0);
+    const dates = DateUtils.getDateRange(startDate, endDate);
 
-    while (currentDate <= endDate) {
-      const dateStr = currentDate.toDateString();
+    dates.forEach(date => {
+      const dateStr = date.toDateString();
 
       if (!this.indices.byDate.has(dateStr)) {
         this.indices.byDate.set(dateStr, new Set());
       }
       this.indices.byDate.get(dateStr).add(event.id);
-
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
+    });
 
     // Index by month(s)
     const startMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
