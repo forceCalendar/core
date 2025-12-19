@@ -502,10 +502,11 @@ body {
 }
 
 .calendar-time-cell {
-  padding: var(--spacing-xs);
+  padding: 2px;
   border-right: 1px solid var(--border-color);
   position: relative;
   cursor: pointer;
+  min-height: 48px;
 }
 
 .calendar-time-cell:last-child {
@@ -517,12 +518,28 @@ body {
 }
 
 .calendar-week-event {
-  padding: 2px 4px;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  padding: 4px 6px;
   font-size: var(--font-size-sm);
   background: var(--primary-600);
   color: white;
-  border-radius: 2px;
+  border-radius: 3px;
   cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s;
+}
+
+.calendar-week-event:hover {
+  background: var(--primary-700);
+  box-shadow: var(--shadow-md);
+  z-index: 10;
 }
 
 /* Day View */
