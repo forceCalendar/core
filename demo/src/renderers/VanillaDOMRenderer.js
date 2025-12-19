@@ -197,6 +197,10 @@ export class VanillaDOMRenderer {
         const month = String(day.date.getMonth() + 1).padStart(2, '0');
         const dayOfMonth = String(day.date.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${dayOfMonth}`;
+
+        // DEBUG: Log date rendering info
+        console.log(`[RENDER] Day ${day.dayOfMonth}: date object =`, day.date, `stored as data-date="${dateStr}"`);
+
         dayCell.setAttribute('data-date', dateStr);
 
         // DEBUG: Log mismatch
@@ -501,14 +505,14 @@ export class VanillaDOMRenderer {
       const dateEl = target.closest('[data-date]');
       if (dateEl && !eventEl) {
         const dateStr = dateEl.getAttribute('data-date'); // YYYY-MM-DD format
-        console.log('Clicked data-date:', dateStr);
+        console.log('[CLICK] Clicked data-date attribute value:', dateStr);
 
         // Parse date in local timezone to avoid UTC conversion issues
         const [year, month, day] = dateStr.split('-').map(Number);
         const localDate = new Date(year, month - 1, day);
-        console.log('Parsed to Date object:', localDate);
-        console.log('Date parts - year:', year, 'month:', month, 'day:', day);
-        console.log('localDate.getDate():', localDate.getDate());
+        console.log('[CLICK] Split into parts - year:', year, 'month:', month, 'day:', day);
+        console.log('[CLICK] Created Date object:', localDate);
+        console.log('[CLICK] Date.getDate():', localDate.getDate(), 'Date.getMonth():', localDate.getMonth(), 'Date.getFullYear():', localDate.getFullYear());
 
         this.handleDateClick(localDate);
         return;
@@ -659,13 +663,13 @@ export class VanillaDOMRenderer {
    * Show create event dialog
    */
   showCreateEventDialog(date) {
-    console.log('showCreateEventDialog called with date:', date);
-    console.log('date.getFullYear():', date.getFullYear());
-    console.log('date.getMonth():', date.getMonth());
-    console.log('date.getDate():', date.getDate());
+    console.log('[MODAL] showCreateEventDialog called with date:', date);
+    console.log('[MODAL] date.getFullYear():', date.getFullYear());
+    console.log('[MODAL] date.getMonth():', date.getMonth(), '(0-indexed, so add 1 for display)');
+    console.log('[MODAL] date.getDate():', date.getDate());
 
     const inputValue = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    console.log('Modal input value will be:', inputValue);
+    console.log('[MODAL] Input field value will be set to:', inputValue);
 
     // Remove existing modal if any
     this.removeModal();
