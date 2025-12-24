@@ -460,8 +460,8 @@ export class Calendar {
         overlapGroups: this.eventStore.getOverlapGroups(dayDate, true),
         getEventPositions: (events) => this.eventStore.calculateEventPositions(events)
       });
-      // Use DateUtils.addDays to handle month boundaries correctly
-      currentDate = DateUtils.addDays(currentDate, 1);
+      // Move to next day
+      currentDate.setDate(currentDate.getDate() + 1);
     }
 
     return {
