@@ -79,10 +79,18 @@
             background: #fafafa;
         }
 
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
         .view-buttons {
             display: flex;
             gap: 8px;
-            margin-bottom: 16px;
         }
 
         .view-buttons button {
@@ -102,6 +110,37 @@
 
         .view-buttons button:hover:not(.active) {
             background: #f5f5f5;
+        }
+
+        .timezone-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .timezone-selector label {
+            font-size: 0.875rem;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .timezone-selector select {
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid #ddd;
+            font-size: 0.875rem;
+            cursor: pointer;
+            min-width: 200px;
+        }
+
+        .timezone-selector select:focus {
+            outline: none;
+            border-color: #0066cc;
+        }
+
+        .navigation-buttons {
+            display: flex;
+            gap: 8px;
         }
 
         .calendar-content {
@@ -364,6 +403,21 @@
         }
 
         /* Responsive */
+        @media (max-width: 768px) {
+            .controls-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .timezone-selector {
+                margin-top: 8px;
+            }
+
+            .timezone-selector select {
+                width: 100%;
+            }
+        }
+
         @media (max-width: 1024px) {
             .right-panel {
                 width: 100%;
@@ -415,13 +469,53 @@
         <!-- Left Panel - Calendar -->
         <div class="left-panel">
             <div class="calendar-controls">
-                <div class="view-buttons">
-                    <button data-view="month" class="active">Month</button>
-                    <button data-view="week">Week</button>
-                    <button data-view="day">Day</button>
-                    <button data-view="list">List</button>
+                <div class="controls-row">
+                    <div class="view-buttons">
+                        <button data-view="month" class="active">Month</button>
+                        <button data-view="week">Week</button>
+                        <button data-view="day">Day</button>
+                        <button data-view="list">List</button>
+                    </div>
+                    <div class="timezone-selector">
+                        <label for="timezone-select">Timezone:</label>
+                        <select id="timezone-select">
+                            <!-- Common US Timezones -->
+                            <optgroup label="United States">
+                                <option value="America/New_York">Eastern Time (New York)</option>
+                                <option value="America/Chicago">Central Time (Chicago)</option>
+                                <option value="America/Denver">Mountain Time (Denver)</option>
+                                <option value="America/Phoenix">Arizona Time (Phoenix)</option>
+                                <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
+                                <option value="America/Anchorage">Alaska Time (Anchorage)</option>
+                                <option value="Pacific/Honolulu">Hawaii Time (Honolulu)</option>
+                            </optgroup>
+                            <!-- European Timezones -->
+                            <optgroup label="Europe">
+                                <option value="Europe/London">London (GMT/BST)</option>
+                                <option value="Europe/Paris">Paris (CET/CEST)</option>
+                                <option value="Europe/Berlin">Berlin (CET/CEST)</option>
+                                <option value="Europe/Moscow">Moscow (MSK)</option>
+                            </optgroup>
+                            <!-- Asia/Pacific Timezones -->
+                            <optgroup label="Asia & Pacific">
+                                <option value="Asia/Dubai">Dubai (GST)</option>
+                                <option value="Asia/Kolkata">India (IST)</option>
+                                <option value="Asia/Shanghai">China (CST)</option>
+                                <option value="Asia/Tokyo">Japan (JST)</option>
+                                <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
+                                <option value="Pacific/Auckland">New Zealand (NZST/NZDT)</option>
+                            </optgroup>
+                            <!-- Other Common -->
+                            <optgroup label="Other">
+                                <option value="UTC">UTC</option>
+                                <option value="America/Toronto">Toronto (EST/EDT)</option>
+                                <option value="America/Sao_Paulo">São Paulo (BRT)</option>
+                                <option value="Africa/Johannesburg">Johannesburg (SAST)</option>
+                            </optgroup>
+                        </select>
+                    </div>
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div class="navigation-buttons">
                     <button id="prev-btn" style="padding: 6px 12px; background: white; border: 1px solid #ddd; cursor: pointer;">←</button>
                     <button id="today-btn" style="padding: 6px 16px; background: white; border: 1px solid #ddd; cursor: pointer;">Today</button>
                     <button id="next-btn" style="padding: 6px 12px; background: white; border: 1px solid #ddd; cursor: pointer;">→</button>
@@ -440,6 +534,9 @@
                         <input type="datetime-local" id="start" required>
                         <button type="submit">Add</button>
                     </div>
+                    <div style="font-size: 0.7rem; color: #666; margin-top: 8px;">
+                        Note: Event will be added in the selected timezone
+                    </div>
                 </form>
             </div>
 
@@ -451,6 +548,10 @@
                 <div class="stat">
                     <span class="stat-label">View:</span>
                     <span class="stat-value" id="current-view">Month</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Timezone:</span>
+                    <span class="stat-value" id="current-timezone">America/New_York</span>
                 </div>
                 <div class="stat">
                     <span class="stat-label">Cache Hits:</span>
@@ -486,7 +587,7 @@
                         <div class="command-buttons">
                             <button class="command-btn category-query" data-command="calendar.getEvents()">Get Events</button>
                             <button class="command-btn category-query" data-command="calendar.getEventsForDate(new Date())">Today's Events</button>
-                            <button class="command-btn category-modify" data-command='calendar.addEvent(new Event({ id: Date.now().toString(), title: "New Event", start: new Date(Date.now() + 3600000), end: new Date(Date.now() + 7200000) }))'>Add Event</button>
+                            <button class="command-btn category-modify" data-command='calendar.addEvent({ id: Date.now().toString(), title: "New Event", start: new Date(Date.now() + 3600000), end: new Date(Date.now() + 7200000) })'>Add Event</button>
                             <button class="command-btn category-modify" data-command="calendar.eventStore.clear()">Clear All</button>
                         </div>
                     </div>
@@ -546,6 +647,9 @@
             timeZone: 'America/New_York'
         });
         window.calendar = calendar;
+
+        // Set initial timezone in dropdown
+        document.getElementById('timezone-select').value = calendar.getTimezone();
 
         // Console functionality
         class ConsoleInterface {
@@ -721,6 +825,7 @@
             let html = '<div class="month-view">';
             html += '<h2 style="margin-bottom: 16px; font-size: 1.25rem; font-weight: 400;">' +
                     new Date(calendar.getCurrentDate()).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) +
+                    ' <span style="font-size: 0.75rem; color: #666;">(' + calendar.getTimezone() + ')</span>' +
                     '</h2>';
             html += '<div class="weekdays">';
             ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
@@ -855,6 +960,27 @@
             updateCalendarDisplay();
         });
 
+        // Timezone selector
+        document.getElementById('timezone-select').addEventListener('change', (e) => {
+            const newTimezone = e.target.value;
+            console.log('Changing timezone from', calendar.getTimezone(), 'to', newTimezone);
+
+            // Update calendar timezone
+            calendar.setTimezone(newTimezone);
+
+            // Update timezone display in stats
+            document.getElementById('current-timezone').textContent = newTimezone;
+
+            // Update display
+            updateCalendarDisplay();
+            updateStats();
+
+            // Show confirmation in console
+            if (window.consoleInterface) {
+                window.consoleInterface.log(`Timezone changed to ${newTimezone}`, 'success');
+            }
+        });
+
         // Quick add form
         document.getElementById('quick-add').addEventListener('submit', (e) => {
             e.preventDefault();
@@ -862,13 +988,13 @@
             const start = new Date(document.getElementById('start').value);
 
             if (title && start) {
-                const event = new Event({
+                // Pass event data to calendar.addEvent which will apply the calendar's timezone
+                const event = calendar.addEvent({
                     id: `evt-${Date.now()}`,
                     title,
                     start,
                     end: new Date(start.getTime() + 3600000)
                 });
-                calendar.addEvent(event);
                 updateCalendarDisplay();
                 updateStats();
                 e.target.reset();
@@ -887,38 +1013,50 @@
         // Load sample data
         function loadSampleEvents() {
             const events = [
-                new Event({
+                {
                     id: '1',
                     title: 'Team Meeting',
                     start: new Date(),
-                    end: new Date(Date.now() + 3600000)
-                }),
-                new Event({
+                    end: new Date(Date.now() + 3600000),
+                    timeZone: calendar.getTimezone()  // Use calendar's timezone
+                },
+                {
                     id: '2',
                     title: 'Project Review',
                     start: new Date(Date.now() + 86400000),
-                    end: new Date(Date.now() + 86400000 + 7200000)
-                }),
-                new Event({
+                    end: new Date(Date.now() + 86400000 + 7200000),
+                    timeZone: calendar.getTimezone()  // Use calendar's timezone
+                },
+                {
                     id: '3',
                     title: 'Sprint Planning',
                     start: new Date(Date.now() + 172800000),
-                    end: new Date(Date.now() + 172800000 + 10800000)
-                })
+                    end: new Date(Date.now() + 172800000 + 10800000),
+                    timeZone: calendar.getTimezone()  // Use calendar's timezone
+                }
             ];
 
-            calendar.eventStore.addEvents(events);
+            calendar.setEvents(events);  // Use setEvents which handles timezone properly
         }
 
-        // Set default datetime
+        // Set default datetime (use local time for datetime-local input)
         const now = new Date();
-        document.getElementById('start').value = now.toISOString().slice(0, 16);
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        document.getElementById('start').value = `${year}-${month}-${day}T${hours}:${minutes}`;
 
         // Initialize
         const consoleInterface = new ConsoleInterface();
+        window.consoleInterface = consoleInterface;  // Make available globally for other handlers
         loadSampleEvents();
         updateCalendarDisplay();
         updateStats();
+
+        // Set initial timezone in stats display
+        document.getElementById('current-timezone').textContent = calendar.getTimezone();
 
         // Focus console
         document.getElementById('console-input').focus();
