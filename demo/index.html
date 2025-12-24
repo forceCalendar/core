@@ -479,38 +479,26 @@
                     <div class="timezone-selector">
                         <label for="timezone-select">Timezone:</label>
                         <select id="timezone-select">
-                            <!-- Common US Timezones -->
-                            <optgroup label="United States">
-                                <option value="America/New_York">Eastern Time (New York)</option>
-                                <option value="America/Chicago">Central Time (Chicago)</option>
-                                <option value="America/Denver">Mountain Time (Denver)</option>
-                                <option value="America/Phoenix">Arizona Time (Phoenix)</option>
-                                <option value="America/Los_Angeles">Pacific Time (Los Angeles)</option>
-                                <option value="America/Anchorage">Alaska Time (Anchorage)</option>
-                                <option value="Pacific/Honolulu">Hawaii Time (Honolulu)</option>
+                            <!-- Australian Timezones -->
+                            <optgroup label="Australia">
+                                <option value="Australia/Sydney">Sydney (NSW/VIC/TAS)</option>
+                                <option value="Australia/Melbourne">Melbourne (VIC)</option>
+                                <option value="Australia/Brisbane">Brisbane (QLD)</option>
+                                <option value="Australia/Adelaide">Adelaide (SA)</option>
+                                <option value="Australia/Perth">Perth (WA)</option>
+                                <option value="Australia/Hobart">Hobart (TAS)</option>
+                                <option value="Australia/Darwin">Darwin (NT)</option>
+                                <option value="Australia/Lord_Howe">Lord Howe Island</option>
                             </optgroup>
-                            <!-- European Timezones -->
-                            <optgroup label="Europe">
+                            <!-- Key International -->
+                            <optgroup label="International">
+                                <option value="America/New_York">New York (EST/EDT)</option>
+                                <option value="America/Los_Angeles">Los Angeles (PST/PDT)</option>
                                 <option value="Europe/London">London (GMT/BST)</option>
-                                <option value="Europe/Paris">Paris (CET/CEST)</option>
-                                <option value="Europe/Berlin">Berlin (CET/CEST)</option>
-                                <option value="Europe/Moscow">Moscow (MSK)</option>
-                            </optgroup>
-                            <!-- Asia/Pacific Timezones -->
-                            <optgroup label="Asia & Pacific">
-                                <option value="Asia/Dubai">Dubai (GST)</option>
-                                <option value="Asia/Kolkata">India (IST)</option>
-                                <option value="Asia/Shanghai">China (CST)</option>
-                                <option value="Asia/Tokyo">Japan (JST)</option>
-                                <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
-                                <option value="Pacific/Auckland">New Zealand (NZST/NZDT)</option>
-                            </optgroup>
-                            <!-- Other Common -->
-                            <optgroup label="Other">
+                                <option value="Asia/Tokyo">Tokyo (JST)</option>
+                                <option value="Asia/Singapore">Singapore (SGT)</option>
+                                <option value="Pacific/Auckland">Auckland (NZST/NZDT)</option>
                                 <option value="UTC">UTC</option>
-                                <option value="America/Toronto">Toronto (EST/EDT)</option>
-                                <option value="America/Sao_Paulo">São Paulo (BRT)</option>
-                                <option value="Africa/Johannesburg">Johannesburg (SAST)</option>
                             </optgroup>
                         </select>
                     </div>
@@ -551,7 +539,7 @@
                 </div>
                 <div class="stat">
                     <span class="stat-label">Timezone:</span>
-                    <span class="stat-value" id="current-timezone">America/New_York</span>
+                    <span class="stat-value" id="current-timezone">Australia/Sydney</span>
                 </div>
                 <div class="stat">
                     <span class="stat-label">Cache Hits:</span>
@@ -644,7 +632,7 @@
         // Initialize calendar
         const calendar = new Calendar({
             view: 'month',
-            timeZone: 'America/New_York'
+            timeZone: 'Australia/Sydney'
         });
         window.calendar = calendar;
 
