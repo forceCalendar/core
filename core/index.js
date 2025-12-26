@@ -1,7 +1,7 @@
 /**
- * Lightning Calendar Core - Main entry point
+ * Force Calendar Core - Main entry point
  * A modern, lightweight, framework-agnostic calendar library
- * Optimized for Salesforce Lightning and Locker Service
+ * Optimized for Salesforce and Locker Service
  */
 
 // Core exports

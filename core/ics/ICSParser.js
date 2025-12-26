@@ -92,7 +92,7 @@ export class ICSParser {
         // Calendar header
         lines.push('BEGIN:VCALENDAR');
         lines.push('VERSION:2.0');
-        lines.push('PRODID:-//Lightning Calendar Core//EN');
+        lines.push('PRODID:-//Force Calendar Core//EN');
         lines.push(`X-WR-CALNAME:${calendarName}`);
         lines.push('METHOD:PUBLISH');
 

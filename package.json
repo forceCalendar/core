@@ -1,9 +1,9 @@
 {
-  "name": "lightning-calendar-core",
+  "name": "force-calendar-core",
   "version": "0.2.0",
   "type": "module",
   "private": false,
-  "description": "A modern, lightweight, framework-agnostic calendar engine optimized for Salesforce Lightning",
+  "description": "A modern, lightweight, framework-agnostic calendar engine optimized for Salesforce",
   "main": "core/index.js",
   "module": "core/index.js",
   "types": "core/types.js",
@@ -35,12 +35,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/thedhanawada/lightning-calendar-core.git"
+    "url": "git+https://github.com/thedhanawada/force-calendar-core.git"
   },
   "keywords": [
     "calendar",
     "salesforce",
-    "lightning",
+    "force",
+    "apex",
     "lwc",
     "locker-service",
     "accessible",
@@ -50,9 +51,9 @@
   "author": "",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/thedhanawada/lightning-calendar-core/issues"
+    "url": "https://github.com/thedhanawada/force-calendar-core/issues"
   },
-  "homepage": "https://github.com/thedhanawada/lightning-calendar-core#readme",
+  "homepage": "https://github.com/thedhanawada/force-calendar-core#readme",
   "devDependencies": {
     "@babel/core": "^7.23.0",
     "@babel/preset-env": "^7.23.0",

@@ -44,7 +44,7 @@ async function runTest(testFile) {
 
 async function main() {
     console.log(`${COLORS.blue}========================================`);
-    console.log(`     Lightning Calendar Core Tests`);
+    console.log(`       Force Calendar Core Tests`);
     console.log(`========================================${COLORS.reset}\n`);
 
     try {
