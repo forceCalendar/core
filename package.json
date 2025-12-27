@@ -9,20 +9,9 @@
   "types": "core/types.js",
   "sideEffects": false,
   "scripts": {
-    "dev": "lerna run dev --stream",
-    "build": "lerna run build --stream",
     "test": "node tests/run-all.js",
     "test:ics": "node tests/integration/test-ics.js",
-    "test:search": "node tests/integration/test-search.js",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "lint": "eslint packages/*/src/**/*.js",
-    "format": "prettier --write \"packages/*/src/**/*.js\"",
-    "benchmark": "node benchmark/index.js",
-    "demo": "vite demo",
-    "lerna": "lerna",
-    "sync:lwc": "bash scripts/sync-lwc-core.sh",
-    "deploy:lwc": "npm run sync:lwc && cd packages/examples/lwc-ui && sfdx force:source:deploy -p force-app"
+    "test:search": "node tests/integration/test-search.js"
   },
   "exports": {
     ".": {
