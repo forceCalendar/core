@@ -447,6 +447,7 @@
         <aside class="sidebar">
             <h3>Documentation</h3>
             <ul>
+                <li><a href="#tech-stack">Tech Stack</a></li>
                 <li><a href="#architecture">Architecture</a></li>
                 <li><a href="#spatial-indexing">Spatial Indexing</a></li>
                 <li><a href="#api">API Reference</a></li>
@@ -465,6 +466,83 @@
                     forceCalendar <span class="core-badge">Core</span> is a high-performance calendar computation engine implemented in pure JavaScript ES6+ modules.
                     This documentation covers the technical architecture, algorithms, and implementation details.
                 </p>
+            </section>
+
+            <section class="section" id="tech-stack" style="background: var(--dark); padding: 2rem; border-radius: 3px; margin-bottom: 3rem;">
+                <h2>Tech Stack</h2>
+                <p style="margin-bottom: 2rem; color: var(--gray);">
+                    Built with modern, battle-tested technologies chosen specifically for enterprise constraints and performance.
+                </p>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem;">
+                    <div>
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Core Language</h3>
+                        <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6;">
+                            <strong>Pure JavaScript (ES6+)</strong><br>
+                            No TypeScript compilation needed. No build step required.
+                            Works directly in any JavaScript environment.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Data Structures</h3>
+                        <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6;">
+                            <strong>R-tree Spatial Indexing</strong><br>
+                            Custom implementation for O(log n) range queries.
+                            Treats time as a spatial dimension for fast lookups.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Module System</h3>
+                        <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6;">
+                            <strong>ES6 Modules</strong><br>
+                            Tree-shakeable imports. Native browser support.
+                            No bundler required for development.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Timezone Support</h3>
+                        <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6;">
+                            <strong>IANA Timezone Database</strong><br>
+                            Full Olson database embedded. DST handling included.
+                            No external API calls needed.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Standards</h3>
+                        <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6;">
+                            <strong>RFC 5545 (iCalendar)</strong><br>
+                            Full RRULE support. ICS import/export.
+                            Industry-standard calendar format.
+                        </p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Caching</h3>
+                        <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6;">
+                            <strong>LRU Cache Implementation</strong><br>
+                            Custom Least Recently Used cache. Adaptive memory management.
+                            Automatic garbage collection.
+                        </p>
+                    </div>
+                </div>
+
+                <div style="margin-top: 2rem; padding: 1.5rem; background: var(--code-bg); border-radius: 3px; border: 1px solid var(--border);">
+                    <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--accent);">Zero Dependencies</h3>
+                    <p style="font-size: 0.875rem; color: var(--gray); line-height: 1.6; margin-bottom: 1rem;">
+                        No external runtime dependencies. Everything is built from scratch to ensure:
+                    </p>
+                    <ul style="list-style: none; padding: 0; font-size: 0.875rem; color: var(--gray);">
+                        <li style="padding: 0.25rem 0;">✓ No supply chain vulnerabilities</li>
+                        <li style="padding: 0.25rem 0;">✓ No license conflicts in enterprise</li>
+                        <li style="padding: 0.25rem 0;">✓ No breaking changes from dependencies</li>
+                        <li style="padding: 0.25rem 0;">✓ Full control over every line of code</li>
+                        <li style="padding: 0.25rem 0;">✓ Minimal bundle size (18KB gzipped)</li>
+                    </ul>
+                </div>
             </section>
 
             <section class="section" id="architecture">
