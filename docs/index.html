@@ -137,6 +137,7 @@
             line-height: 1.2;
             margin-bottom: 1.5rem;
             letter-spacing: -2px;
+            text-align: center;
         }
 
         .hero h1 strong {
@@ -147,8 +148,25 @@
             font-size: 1.25rem;
             color: var(--accent);
             margin-bottom: 2rem;
-            max-width: 700px;
+            max-width: 900px;
             line-height: 1.8;
+            margin-left: auto;
+            margin-right: auto;
+            text-align: center;
+        }
+
+        .core-badge {
+            display: inline-block;
+            font-size: 0.75em;
+            background: var(--border);
+            padding: 0.125rem 0.5rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--gray);
+            margin-left: 0.5rem;
+            vertical-align: baseline;
+            font-weight: 400;
         }
 
         /* New Project Notice */
@@ -157,8 +175,8 @@
             border: 1px solid var(--border);
             border-radius: 3px;
             padding: 1.5rem;
-            margin: 2rem 0;
-            display: inline-block;
+            margin: 2rem auto;
+            max-width: 800px;
         }
 
         .new-notice-header {
@@ -621,7 +639,7 @@
 
     <section class="hero">
         <div class="hero-content">
-            <h1><strong>forceCalendar Core</strong></h1>
+            <h1><strong>forceCalendar</strong><span class="core-badge">Core</span></h1>
             <p class="hero-subtitle">
                 Yes, there are hundreds of calendar libraries. Here's why we built another one:
                 Complete separation between calendar logic and UI. Built specifically for enterprise
@@ -657,7 +675,7 @@
                         Traditional Calendar Libraries
                     </div>
                     <div class="comparison-cell comparison-header">
-                        forceCalendar Core
+                        forceCalendar <span class="core-badge" style="font-size: 0.875rem;">Core</span>
                     </div>
                 </div>
                 <div class="comparison-row">
@@ -762,7 +780,7 @@
         <!-- What Is forceCalendar Core -->
         <section class="engine-section">
             <div class="section-header">
-                <h2>What Is forceCalendar Core?</h2>
+                <h2>What Is forceCalendar <span class="core-badge" style="font-size: 0.75em;">Core</span>?</h2>
                 <p>It's the math department of your calendar application</p>
             </div>
 
@@ -773,7 +791,7 @@
                         <div class="arch-layer-desc">Salesforce LWC, React App, API Server, etc.</div>
                     </div>
                     <div class="arch-layer" style="border: 2px solid var(--accent);">
-                        <div class="arch-layer-title">forceCalendar Core</div>
+                        <div class="arch-layer-title">forceCalendar <span class="core-badge" style="font-size: 0.75rem;">Core</span></div>
                         <div class="arch-layer-desc">Handles all calendar computations</div>
                     </div>
                     <div class="arch-layer">
@@ -954,7 +972,7 @@
     </div>
 
     <footer>
-        <div>forceCalendar Core • Built for enterprise constraints</div>
+        <div>forceCalendar <span class="core-badge" style="font-size: 0.75rem;">Core</span> • Built for enterprise constraints</div>
         <div class="footer-links">
             <a href="https://www.npmjs.com/package/@forcecalendar/core">NPM Package</a>
             <a href="https://github.com/ForceCalendar/force-calendar-core">Source Code</a>
