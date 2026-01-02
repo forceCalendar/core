@@ -143,6 +143,14 @@ export class Calendar {
   }
 
   /**
+   * Alias for goToDate (compat)
+   * @param {Date} date - The date to navigate to
+   */
+  setDate(date) {
+    this.goToDate(date);
+  }
+
+  /**
    * Get the current date
    * @returns {Date}
    */
@@ -197,6 +205,15 @@ export class Calendar {
     }
 
     return removed;
+  }
+
+  /**
+   * Alias for removeEvent (compat)
+   * @param {string} eventId - The event ID
+   * @returns {boolean} True if removed
+   */
+  deleteEvent(eventId) {
+    return this.removeEvent(eventId);
   }
 
   /**
@@ -279,6 +296,26 @@ export class Calendar {
    */
   getTimezone() {
     return this.config.timeZone;
+  }
+
+  /**
+   * Set the calendar locale
+   * @param {string} locale - Locale identifier (e.g. 'en-US')
+   */
+  setLocale(locale) {
+    this.config.locale = locale;
+    this.state.setState({ locale });
+    this._emit('localeChange', { locale });
+  }
+
+  /**
+   * Set the week start day
+   * @param {number} weekStartsOn - 0 = Sunday, 1 = Monday, etc.
+   */
+  setWeekStartsOn(weekStartsOn) {
+    this.config.weekStartsOn = weekStartsOn;
+    this.state.setState({ weekStartsOn });
+    this._emit('weekStartsOnChange', { weekStartsOn });
   }
 
   /**
