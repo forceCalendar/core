@@ -122,6 +122,7 @@ export class RRuleParser {
 
     /**
      * Parse BYDAY value
+     * Returns array of strings like ['MO', '2TU', '-1FR'] for compatibility with RecurrenceEngine
      * @private
      */
     static parseByDay(value) {
@@ -130,14 +131,14 @@ export class RRuleParser {
         const result = [];
 
         for (const day of days) {
-            const match = day.match(/^([+-]?\d*)([A-Z]{2})$/);
+            const trimmed = day.trim().toUpperCase();
+            const match = trimmed.match(/^([+-]?\d*)([A-Z]{2})$/);
             if (match) {
                 const [_, nth, weekday] = match;
                 if (weekDays.includes(weekday)) {
-                    result.push({
-                        weekday,
-                        nth: nth ? parseInt(nth, 10) : null
-                    });
+                    // Return string format for RecurrenceEngine compatibility
+                    // e.g., 'MO', '2MO', '-1FR'
+                    result.push(nth ? `${nth}${weekday}` : weekday);
                 }
             }
         }

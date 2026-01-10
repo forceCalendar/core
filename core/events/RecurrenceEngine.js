@@ -108,9 +108,18 @@ export class RecurrenceEngine {
       case 'WEEKLY':
         if (rule.byDay && rule.byDay.length > 0) {
           // Find next day that matches byDay
+          // Limit iterations to prevent infinite loop with malformed byDay
+          const maxIterations = 8; // 7 days + 1 for safety
+          let iterations = 0;
           next.setDate(next.getDate() + 1);
-          while (!this.matchesByDay(next, rule.byDay)) {
+          while (!this.matchesByDay(next, rule.byDay) && iterations < maxIterations) {
             next.setDate(next.getDate() + 1);
+            iterations++;
+          }
+          // If no match found, fall back to simple weekly interval
+          if (iterations >= maxIterations) {
+            console.warn('RecurrenceEngine: Invalid byDay rule, falling back to weekly interval');
+            next.setDate(next.getDate() + (7 * rule.interval) - maxIterations);
           }
         } else {
           // Simple weekly recurrence

@@ -51,8 +51,10 @@ export class TimezoneManager {
         if (!date) return null;
         if (timezone === 'UTC') return new Date(date);
 
+        // offset is positive for timezones behind UTC (e.g., NYC = +300)
+        // To convert local to UTC, we ADD the offset
         const offset = this.getTimezoneOffset(date, timezone);
-        return new Date(date.getTime() - (offset * 60 * 1000));
+        return new Date(date.getTime() + (offset * 60 * 1000));
     }
 
     /**
@@ -65,8 +67,10 @@ export class TimezoneManager {
         if (!utcDate) return null;
         if (timezone === 'UTC') return new Date(utcDate);
 
+        // offset is positive for timezones behind UTC (e.g., NYC = +300)
+        // To convert UTC to local, we SUBTRACT the offset
         const offset = this.getTimezoneOffset(utcDate, timezone);
-        return new Date(utcDate.getTime() + (offset * 60 * 1000));
+        return new Date(utcDate.getTime() - (offset * 60 * 1000));
     }
 
     /**

@@ -1,59 +1,137 @@
-name: Publish to NPM
+name: Auto Publish to NPM
 
 on:
-  release:
-    types: [created]
+  push:
+    branches: [ master, main ]
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to publish (e.g., 0.2.1)'
+      bump:
+        description: 'Version bump type'
+        default: 'patch'
         required: true
-        type: string
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
 
 jobs:
   publish:
+    # Avoid running on version bump commits created by this workflow
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
 
     - name: Install dependencies
       run: npm ci
 
     - name: Run tests
       run: npm test
-      continue-on-error: true  # Don't block publishing if tests fail (you can remove this line to enforce tests)
 
-    - name: Verify package contents
+    - name: Configure Git
       run: |
-        echo "Package contents that will be published:"
-        npm pack --dry-run
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
 
-    - name: Update version (if manual trigger)
-      if: github.event_name == 'workflow_dispatch'
+    - name: Determine and Bump Version
+      id: version_bump
       run: |
-        npm version ${{ github.event.inputs.version }} --no-git-tag-version
+        PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
+
+        # Get latest version from NPM (source of truth), fallback to local
+        NPM_VERSION=$(npm view "$PACKAGE_NAME" version 2>/dev/null || echo "")
+        if [ -n "$NPM_VERSION" ]; then
+          echo "Syncing to NPM version: $NPM_VERSION"
+          npm version "$NPM_VERSION" --no-git-tag-version --allow-same-version
+        fi
+
+        # Determine bump type from commit message or manual input
+        BUMP_TYPE="patch"  # Default to patch for small changes
+
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          BUMP_TYPE="${{ github.event.inputs.bump }}"
+        else
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          # Check for explicit version keywords in commit message
+          if echo "$COMMIT_MSG" | grep -qiE '\[major\]|BREAKING CHANGE|!:'; then
+            BUMP_TYPE="major"
+          elif echo "$COMMIT_MSG" | grep -qiE '\[minor\]|feat:|feature:'; then
+            BUMP_TYPE="minor"
+          elif echo "$COMMIT_MSG" | grep -qiE '\[patch\]|fix:|bugfix:|hotfix:'; then
+            BUMP_TYPE="patch"
+          fi
+        fi
+
+        echo "Bump type: $BUMP_TYPE"
+
+        NEW_VERSION=$(npm version $BUMP_TYPE --no-git-tag-version)
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "Calculated new version: $NEW_VERSION"
+
+    - name: Check if version already exists
+      id: check_version
+      run: |
+        PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
+        VERSION=${{ steps.version_bump.outputs.new_version }}
+        if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
+          echo "Version $VERSION already exists on NPM. Skipping publish."
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
 
     - name: Publish to NPM
+      if: steps.check_version.outputs.exists == 'false'
       run: npm publish --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-    - name: Create release tag (if manual trigger)
-      if: github.event_name == 'workflow_dispatch'
+    - name: Publish to GitHub Packages
+      if: steps.check_version.outputs.exists == 'false'
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" > .npmrc
+        npm publish --registry=https://npm.pkg.github.com
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Commit and Push changes
+      if: steps.check_version.outputs.exists == 'false'
+      run: |
         git add package.json package-lock.json
-        git commit -m "Release v${{ github.event.inputs.version }}"
-        git tag v${{ github.event.inputs.version }}
-        git push origin v${{ github.event.inputs.version }}
+        git commit -m "Release ${{ steps.version_bump.outputs.new_version }} [skip ci]"
+
+        # Only create tag if it doesn't already exist
+        if ! git rev-parse "${{ steps.version_bump.outputs.new_version }}" >/dev/null 2>&1; then
+          git tag ${{ steps.version_bump.outputs.new_version }}
+        fi
+
+        git push origin HEAD --tags
+
+        # Create an official GitHub Release (only if it doesn't exist)
+        if ! gh release view ${{ steps.version_bump.outputs.new_version }} > /dev/null 2>&1; then
+          gh release create ${{ steps.version_bump.outputs.new_version }} \
+            --title "Release ${{ steps.version_bump.outputs.new_version }}" \
+            --notes "Automated release for version ${{ steps.version_bump.outputs.new_version }}"
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

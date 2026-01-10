@@ -294,34 +294,47 @@ export class EventStore {
     // Use local date string for the query date (in the calendar's timezone)
     const dateStr = DateUtils.getLocalDateString(date);
 
-    // Get all events indexed for this date
-    const allEvents = [];
+    // Collect candidate event IDs from indices
+    const candidateIds = new Set();
 
-    // Since events might span multiple days in different timezones,
-    // we need to check events from surrounding dates too
+    // Check byDate index for nearby dates (handles most events)
     const checkDate = new Date(date);
     for (let offset = -1; offset <= 1; offset++) {
       const tempDate = new Date(checkDate);
       tempDate.setDate(tempDate.getDate() + offset);
       const tempDateStr = DateUtils.getLocalDateString(tempDate);
-      const eventIds = this.indices.byDate.get(tempDateStr) || new Set();
+      const eventIds = this.indices.byDate.get(tempDateStr);
+      if (eventIds) {
+        eventIds.forEach(id => candidateIds.add(id));
+      }
+    }
 
-      for (const id of eventIds) {
-        const event = this.events.get(id);
-        if (event && !allEvents.find(e => e.id === event.id)) {
-          // Check if event actually occurs on the requested date in the given timezone
-          const eventStartLocal = event.getStartInTimezone(timezone);
-          const eventEndLocal = event.getEndInTimezone(timezone);
+    // Also check byMonth index to catch long-running events that might not be
+    // indexed in byDate for this specific date (lazy indexing only indexes
+    // first/last week of multi-week events)
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const monthEventIds = this.indices.byMonth.get(monthKey);
+    if (monthEventIds) {
+      monthEventIds.forEach(id => candidateIds.add(id));
+    }
 
-          const startOfDay = new Date(date);
-          startOfDay.setHours(0, 0, 0, 0);
-          const endOfDay = new Date(date);
-          endOfDay.setHours(23, 59, 59, 999);
+    // Filter candidates to events that actually overlap with the requested date
+    const allEvents = [];
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
 
-          // Event overlaps with this day if it starts before end of day and ends after start of day
-          if (eventStartLocal <= endOfDay && eventEndLocal >= startOfDay) {
-            allEvents.push(event);
-          }
+    for (const id of candidateIds) {
+      const event = this.events.get(id);
+      if (event) {
+        // Check if event actually occurs on the requested date in the given timezone
+        const eventStartLocal = event.getStartInTimezone(timezone);
+        const eventEndLocal = event.getEndInTimezone(timezone);
+
+        // Event overlaps with this day if it starts before end of day and ends after start of day
+        if (eventStartLocal <= endOfDay && eventEndLocal >= startOfDay) {
+          allEvents.push(event);
         }
       }
     }
