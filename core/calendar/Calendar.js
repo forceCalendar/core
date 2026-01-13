@@ -357,11 +357,7 @@ export class Calendar {
    * @returns {string} Formatted date string
    */
   formatInTimezone(date, timezone = null, options = {}) {
-    return this.timezoneManager.formatInTimezone(
-      date,
-      timezone || this.config.timeZone,
-      options
-    );
+    return this.timezoneManager.formatInTimezone(date, timezone || this.config.timeZone, options);
   }
 
   /**
@@ -437,7 +433,9 @@ export class Calendar {
     let currentDate = new Date(startDate);
 
     // Generate weeks
-    const maxWeeks = fixedWeekCount ? 6 : Math.ceil((lastDay.getDate() + DateUtils.getDayOfWeek(firstDay, weekStartsOn)) / 7);
+    const maxWeeks = fixedWeekCount
+      ? 6
+      : Math.ceil((lastDay.getDate() + DateUtils.getDayOfWeek(firstDay, weekStartsOn)) / 7);
 
     for (let weekIndex = 0; weekIndex < maxWeeks; weekIndex++) {
       const week = {
@@ -502,7 +500,7 @@ export class Calendar {
         events: this.getEventsForDate(dayDate),
         // Add overlap groups for positioning overlapping events
         overlapGroups: this.eventStore.getOverlapGroups(dayDate, true),
-        getEventPositions: (events) => this.eventStore.calculateEventPositions(events)
+        getEventPositions: events => this.eventStore.calculateEventPositions(events)
       });
       // Move to next day
       currentDate.setDate(currentDate.getDate() + 1);
@@ -706,7 +704,7 @@ export class Calendar {
     });
 
     // Listen to event store changes
-    this.eventStore.subscribe((change) => {
+    this.eventStore.subscribe(change => {
       this._emit('eventStoreChange', change);
     });
   }
@@ -752,4 +750,4 @@ export class Calendar {
 
     this._emit('destroy');
   }
-}// Test workflow
+} // Test workflow

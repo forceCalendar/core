@@ -86,9 +86,8 @@ export class LRUCache {
    * @returns {Object} Cache stats
    */
   getStats() {
-    const hitRate = this.hits + this.misses > 0
-      ? (this.hits / (this.hits + this.misses) * 100).toFixed(2)
-      : 0;
+    const hitRate =
+      this.hits + this.misses > 0 ? ((this.hits / (this.hits + this.misses)) * 100).toFixed(2) : 0;
 
     return {
       size: this.cache.size,

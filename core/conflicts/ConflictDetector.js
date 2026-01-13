@@ -47,7 +47,8 @@ export class ConflictDetector {
     const searchStart = new Date(event.start.getTime() - opts.bufferMinutes * 60000);
     const searchEnd = new Date(event.end.getTime() + opts.bufferMinutes * 60000);
 
-    const potentialConflicts = this.eventStore.getEventsInRange(searchStart, searchEnd, false)
+    const potentialConflicts = this.eventStore
+      .getEventsInRange(searchStart, searchEnd, false)
       .filter(e => {
         // Exclude self
         if (e.id === event.id) return false;
@@ -64,11 +65,7 @@ export class ConflictDetector {
 
     // Check each potential conflict
     for (const conflictingEvent of potentialConflicts) {
-      const eventConflicts = this._detectEventConflicts(
-        event,
-        conflictingEvent,
-        opts
-      );
+      const eventConflicts = this._detectEventConflicts(event, conflictingEvent, opts);
 
       if (eventConflicts.length > 0) {
         conflicts.push(...eventConflicts);
@@ -131,8 +128,8 @@ export class ConflictDetector {
       if (!opts.includeStatuses.includes(event.status)) return false;
       if (event.status === 'cancelled') return false;
 
-      return event.attendees && event.attendees.some(attendee =>
-        attendeeEmails.includes(attendee.email)
+      return (
+        event.attendees && event.attendees.some(attendee => attendeeEmails.includes(attendee.email))
       );
     });
 
@@ -173,9 +170,10 @@ export class ConflictDetector {
     const freePeriods = [];
 
     // Get busy periods
-    const busyPeriods = opts.attendeeEmails.length > 0
-      ? this.getBusyPeriods(opts.attendeeEmails, start, end)
-      : this._getAllBusyPeriods(start, end);
+    const busyPeriods =
+      opts.attendeeEmails.length > 0
+        ? this.getBusyPeriods(opts.attendeeEmails, start, end)
+        : this._getAllBusyPeriods(start, end);
 
     // Find gaps between busy periods
     let currentTime = new Date(start);
@@ -186,7 +184,10 @@ export class ConflictDetector {
         const gapDuration = (busy.start - currentTime) / 60000; // minutes
         if (gapDuration >= duration) {
           // Check if within business hours if required
-          if (!opts.businessHoursOnly || this._isWithinBusinessHours(currentTime, busy.start, opts)) {
+          if (
+            !opts.businessHoursOnly ||
+            this._isWithinBusinessHours(currentTime, busy.start, opts)
+          ) {
             freePeriods.push({
               start: new Date(currentTime),
               end: new Date(busy.start)
@@ -221,11 +222,7 @@ export class ConflictDetector {
     const conflicts = [];
 
     // Check time overlap with buffer
-    const hasTimeOverlap = this._checkTimeOverlap(
-      event1,
-      event2,
-      options.bufferMinutes
-    );
+    const hasTimeOverlap = this._checkTimeOverlap(event1, event2, options.bufferMinutes);
 
     if (hasTimeOverlap) {
       // Time conflict
@@ -490,14 +487,17 @@ export class ConflictDetector {
    * @private
    */
   _getAllBusyPeriods(start, end) {
-    const events = this.eventStore.getEventsInRange(start, end, false)
+    const events = this.eventStore
+      .getEventsInRange(start, end, false)
       .filter(e => e.status !== 'cancelled');
 
-    return events.map(event => ({
-      start: event.start,
-      end: event.end,
-      eventIds: [event.id]
-    })).sort((a, b) => a.start - b.start);
+    return events
+      .map(event => ({
+        start: event.start,
+        end: event.end,
+        eventIds: [event.id]
+      }))
+      .sort((a, b) => a.start - b.start);
   }
 
   /**

@@ -108,7 +108,9 @@ export class StateManager {
       ...updates,
       // Preserve nested objects
       filters: updates.filters ? { ...oldState.filters, ...updates.filters } : oldState.filters,
-      businessHours: updates.businessHours ? { ...oldState.businessHours, ...updates.businessHours } : oldState.businessHours,
+      businessHours: updates.businessHours
+        ? { ...oldState.businessHours, ...updates.businessHours }
+        : oldState.businessHours,
       metadata: updates.metadata ? { ...oldState.metadata, ...updates.metadata } : oldState.metadata
     };
 

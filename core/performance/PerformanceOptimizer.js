@@ -31,7 +31,7 @@ export class PerformanceOptimizer {
       this.memoryManager = new AdaptiveMemoryManager({
         checkInterval: 30000,
         memoryThreshold: 0.75,
-        criticalThreshold: 0.90
+        criticalThreshold: 0.9
       });
 
       // Register caches with memory manager
@@ -220,9 +220,7 @@ export class PerformanceOptimizer {
    * @returns {boolean} True if should use lazy indexing
    */
   shouldUseLazyIndexing(event) {
-    const daySpan = Math.ceil(
-      (event.end - event.start) / (24 * 60 * 60 * 1000)
-    );
+    const daySpan = Math.ceil((event.end - event.start) / (24 * 60 * 60 * 1000));
     return daySpan > this.config.maxIndexDays;
   }
 
@@ -273,7 +271,7 @@ export class PerformanceOptimizer {
 
     markers.pending = true;
 
-    const promise = new Promise((resolve) => {
+    const promise = new Promise(resolve => {
       // Simulate async indexing (in real app, could be in worker)
       setTimeout(() => {
         const indexed = new Set();

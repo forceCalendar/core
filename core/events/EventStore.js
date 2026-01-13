@@ -251,13 +251,15 @@ export class EventStore {
 
     // Filter by having attendees
     if (Object.prototype.hasOwnProperty.call(filters, 'hasAttendees')) {
-      results = results.filter(event => filters.hasAttendees ? event.hasAttendees : !event.hasAttendees);
+      results = results.filter(event =>
+        filters.hasAttendees ? event.hasAttendees : !event.hasAttendees
+      );
     }
 
     // Filter by organizer email
     if (filters.organizerEmail) {
-      results = results.filter(event =>
-        event.organizer && event.organizer.email === filters.organizerEmail
+      results = results.filter(
+        event => event.organizer && event.organizer.email === filters.organizerEmail
       );
     }
 
@@ -456,7 +458,7 @@ export class EventStore {
     events.sort((a, b) => {
       const startDiff = a.start - b.start;
       if (startDiff !== 0) return startDiff;
-      return (b.end - b.start) - (a.end - a.start);
+      return b.end - b.start - (a.end - a.start);
     });
 
     // Track which columns are occupied at each time
@@ -717,8 +719,10 @@ export class EventStore {
     // Index first week
     const firstWeekEnd = new Date(startDate);
     firstWeekEnd.setDate(firstWeekEnd.getDate() + 7);
-    const firstWeekDates = DateUtils.getDateRange(startDate,
-      firstWeekEnd < endDate ? firstWeekEnd : endDate);
+    const firstWeekDates = DateUtils.getDateRange(
+      startDate,
+      firstWeekEnd < endDate ? firstWeekEnd : endDate
+    );
 
     firstWeekDates.forEach(date => {
       const dateStr = DateUtils.getLocalDateString(date);
@@ -851,11 +855,19 @@ export class EventStore {
       this.batchBackup = {
         events: new Map(this.events),
         indices: {
-          byDate: new Map(Array.from(this.indices.byDate.entries()).map(([k, v]) => [k, new Set(v)])),
-          byMonth: new Map(Array.from(this.indices.byMonth.entries()).map(([k, v]) => [k, new Set(v)])),
+          byDate: new Map(
+            Array.from(this.indices.byDate.entries()).map(([k, v]) => [k, new Set(v)])
+          ),
+          byMonth: new Map(
+            Array.from(this.indices.byMonth.entries()).map(([k, v]) => [k, new Set(v)])
+          ),
           recurring: new Set(this.indices.recurring),
-          byCategory: new Map(Array.from(this.indices.byCategory.entries()).map(([k, v]) => [k, new Set(v)])),
-          byStatus: new Map(Array.from(this.indices.byStatus.entries()).map(([k, v]) => [k, new Set(v)]))
+          byCategory: new Map(
+            Array.from(this.indices.byCategory.entries()).map(([k, v]) => [k, new Set(v)])
+          ),
+          byStatus: new Map(
+            Array.from(this.indices.byStatus.entries()).map(([k, v]) => [k, new Set(v)])
+          )
         },
         version: this.version
       };

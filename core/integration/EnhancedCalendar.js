@@ -8,456 +8,421 @@ import { SearchWorkerManager } from '../search/SearchWorkerManager.js';
 import { RecurrenceEngineV2 } from '../events/RecurrenceEngineV2.js';
 
 export class EnhancedCalendar extends Calendar {
-    constructor(config) {
-        super(config);
+  constructor(config) {
+    super(config);
 
-        // Initialize enhanced components
-        this.searchManager = new SearchWorkerManager(this.eventStore);
-        this.recurrenceEngine = new RecurrenceEngineV2();
+    // Initialize enhanced components
+    this.searchManager = new SearchWorkerManager(this.eventStore);
+    this.recurrenceEngine = new RecurrenceEngineV2();
 
-        // Performance monitoring
-        this.performanceMetrics = {
-            searchTime: [],
-            expansionTime: [],
-            renderTime: []
-        };
+    // Performance monitoring
+    this.performanceMetrics = {
+      searchTime: [],
+      expansionTime: [],
+      renderTime: []
+    };
 
-        // Setup event listeners for real-time indexing
-        this.setupRealtimeIndexing();
+    // Setup event listeners for real-time indexing
+    this.setupRealtimeIndexing();
+  }
+
+  /**
+   * Enhanced search with worker support
+   */
+  async search(query, options = {}) {
+    const startTime = performance.now();
+
+    try {
+      // Use enhanced search manager
+      const results = await this.searchManager.search(query, {
+        fields: options.fields || ['title', 'description', 'location', 'category'],
+        fuzzy: options.fuzzy !== false,
+        limit: options.limit || 50,
+        prefixMatch: options.autocomplete || false,
+        ...options
+      });
+
+      const endTime = performance.now();
+      this.recordMetric('searchTime', endTime - startTime);
+
+      // Transform results to match expected format
+      return results.map(r => r.event);
+    } catch (error) {
+      console.error('Search error:', error);
+      // Fallback to basic search
+      return super.search ? super.search(query, options) : [];
+    }
+  }
+
+  /**
+   * Get events with enhanced recurrence expansion
+   */
+  async getEventsInRange(startDate, endDate, options = {}) {
+    const startTime = performance.now();
+
+    const regularEvents = [];
+    const recurringEvents = [];
+
+    // Separate regular and recurring events
+    const allEvents = this.eventStore.getEventsInDateRange(startDate, endDate);
+
+    for (const event of allEvents) {
+      if (event.recurring) {
+        recurringEvents.push(event);
+      } else {
+        regularEvents.push(event);
+      }
     }
 
-    /**
-     * Enhanced search with worker support
-     */
-    async search(query, options = {}) {
-        const startTime = performance.now();
+    // Expand recurring events with enhanced engine
+    const expandedOccurrences = [];
 
-        try {
-            // Use enhanced search manager
-            const results = await this.searchManager.search(query, {
-                fields: options.fields || ['title', 'description', 'location', 'category'],
-                fuzzy: options.fuzzy !== false,
-                limit: options.limit || 50,
-                prefixMatch: options.autocomplete || false,
-                ...options
-            });
+    for (const event of recurringEvents) {
+      const occurrences = this.recurrenceEngine.expandEvent(event, startDate, endDate, {
+        maxOccurrences: options.maxOccurrences || 365,
+        includeModified: options.includeModified !== false,
+        includeCancelled: options.includeCancelled || false,
+        timezone: options.timezone || event.timeZone,
+        handleDST: options.handleDST !== false
+      });
 
-            const endTime = performance.now();
-            this.recordMetric('searchTime', endTime - startTime);
-
-            // Transform results to match expected format
-            return results.map(r => r.event);
-        } catch (error) {
-            console.error('Search error:', error);
-            // Fallback to basic search
-            return super.search ? super.search(query, options) : [];
-        }
+      expandedOccurrences.push(...occurrences);
     }
 
-    /**
-     * Get events with enhanced recurrence expansion
-     */
-    async getEventsInRange(startDate, endDate, options = {}) {
-        const startTime = performance.now();
+    const endTime = performance.now();
+    this.recordMetric('expansionTime', endTime - startTime);
 
-        const regularEvents = [];
-        const recurringEvents = [];
+    // Combine and sort
+    const allEventsInRange = [...regularEvents, ...expandedOccurrences];
+    allEventsInRange.sort((a, b) => a.start - b.start);
 
-        // Separate regular and recurring events
-        const allEvents = this.eventStore.getEventsInDateRange(startDate, endDate);
+    return allEventsInRange;
+  }
 
-        for (const event of allEvents) {
-            if (event.recurring) {
-                recurringEvents.push(event);
-            } else {
-                regularEvents.push(event);
-            }
-        }
+  /**
+   * Modify a single occurrence of a recurring event
+   */
+  modifyOccurrence(eventId, occurrenceDate, modifications) {
+    // Add to modified instances
+    this.recurrenceEngine.addModifiedInstance(eventId, occurrenceDate, modifications);
 
-        // Expand recurring events with enhanced engine
-        const expandedOccurrences = [];
+    // Emit change event
+    this.emit('occurrence:modified', {
+      eventId,
+      occurrenceDate,
+      modifications
+    });
 
-        for (const event of recurringEvents) {
-            const occurrences = this.recurrenceEngine.expandEvent(
-                event,
-                startDate,
-                endDate,
-                {
-                    maxOccurrences: options.maxOccurrences || 365,
-                    includeModified: options.includeModified !== false,
-                    includeCancelled: options.includeCancelled || false,
-                    timezone: options.timezone || event.timeZone,
-                    handleDST: options.handleDST !== false
-                }
-            );
+    // Trigger re-render if in view
+    this.refreshView();
+  }
 
-            expandedOccurrences.push(...occurrences);
-        }
+  /**
+   * Cancel a single occurrence of a recurring event
+   */
+  cancelOccurrence(eventId, occurrenceDate, reason = 'Cancelled') {
+    // Add exception
+    this.recurrenceEngine.addException(eventId, occurrenceDate, reason);
 
-        const endTime = performance.now();
-        this.recordMetric('expansionTime', endTime - startTime);
+    // Emit change event
+    this.emit('occurrence:cancelled', {
+      eventId,
+      occurrenceDate,
+      reason
+    });
 
-        // Combine and sort
-        const allEventsInRange = [...regularEvents, ...expandedOccurrences];
-        allEventsInRange.sort((a, b) => a.start - b.start);
+    // Trigger re-render
+    this.refreshView();
+  }
 
-        return allEventsInRange;
+  /**
+   * Bulk operations for recurring events
+   */
+  async bulkModifyOccurrences(eventId, dateRange, modifications) {
+    const event = this.eventStore.getEvent(eventId);
+    if (!event || !event.recurring) {
+      throw new Error('Event not found or not recurring');
     }
 
-    /**
-     * Modify a single occurrence of a recurring event
-     */
-    modifyOccurrence(eventId, occurrenceDate, modifications) {
-        // Add to modified instances
-        this.recurrenceEngine.addModifiedInstance(
-            eventId,
-            occurrenceDate,
-            modifications
-        );
+    // Get all occurrences in range
+    const occurrences = this.recurrenceEngine.expandEvent(event, dateRange.start, dateRange.end);
 
-        // Emit change event
-        this.emit('occurrence:modified', {
-            eventId,
-            occurrenceDate,
-            modifications
-        });
-
-        // Trigger re-render if in view
-        this.refreshView();
+    // Apply modifications to each
+    for (const occurrence of occurrences) {
+      this.recurrenceEngine.addModifiedInstance(eventId, occurrence.start, modifications);
     }
 
-    /**
-     * Cancel a single occurrence of a recurring event
-     */
-    cancelOccurrence(eventId, occurrenceDate, reason = 'Cancelled') {
-        // Add exception
-        this.recurrenceEngine.addException(eventId, occurrenceDate, reason);
+    // Emit bulk change event
+    this.emit('occurrences:bulk-modified', {
+      eventId,
+      count: occurrences.length,
+      modifications
+    });
 
-        // Emit change event
-        this.emit('occurrence:cancelled', {
-            eventId,
-            occurrenceDate,
-            reason
-        });
+    this.refreshView();
+  }
 
-        // Trigger re-render
-        this.refreshView();
+  /**
+   * Advanced search with filters and recurrence awareness
+   */
+  async advancedSearch(query, filters = {}, options = {}) {
+    // First get search results
+    const searchResults = await this.search(query, options);
+
+    // Apply additional filters
+    let filtered = searchResults;
+
+    // Date range filter with recurrence expansion
+    if (filters.dateRange) {
+      const expandedEvents = await this.getEventsInRange(
+        filters.dateRange.start,
+        filters.dateRange.end,
+        { includeModified: true }
+      );
+
+      const expandedIds = new Set(expandedEvents.map(e => e.recurringEventId || e.id));
+
+      filtered = filtered.filter(e => expandedIds.has(e.id));
     }
 
-    /**
-     * Bulk operations for recurring events
-     */
-    async bulkModifyOccurrences(eventId, dateRange, modifications) {
-        const event = this.eventStore.getEvent(eventId);
-        if (!event || !event.recurring) {
-            throw new Error('Event not found or not recurring');
-        }
-
-        // Get all occurrences in range
-        const occurrences = this.recurrenceEngine.expandEvent(
-            event,
-            dateRange.start,
-            dateRange.end
-        );
-
-        // Apply modifications to each
-        for (const occurrence of occurrences) {
-            this.recurrenceEngine.addModifiedInstance(
-                eventId,
-                occurrence.start,
-                modifications
-            );
-        }
-
-        // Emit bulk change event
-        this.emit('occurrences:bulk-modified', {
-            eventId,
-            count: occurrences.length,
-            modifications
-        });
-
-        this.refreshView();
+    // Category filter
+    if (filters.categories && filters.categories.length > 0) {
+      const categorySet = new Set(filters.categories);
+      filtered = filtered.filter(e => e.categories && e.categories.some(c => categorySet.has(c)));
     }
 
-    /**
-     * Advanced search with filters and recurrence awareness
-     */
-    async advancedSearch(query, filters = {}, options = {}) {
-        // First get search results
-        const searchResults = await this.search(query, options);
-
-        // Apply additional filters
-        let filtered = searchResults;
-
-        // Date range filter with recurrence expansion
-        if (filters.dateRange) {
-            const expandedEvents = await this.getEventsInRange(
-                filters.dateRange.start,
-                filters.dateRange.end,
-                { includeModified: true }
-            );
-
-            const expandedIds = new Set(expandedEvents.map(e =>
-                e.recurringEventId || e.id
-            ));
-
-            filtered = filtered.filter(e => expandedIds.has(e.id));
-        }
-
-        // Category filter
-        if (filters.categories && filters.categories.length > 0) {
-            const categorySet = new Set(filters.categories);
-            filtered = filtered.filter(e =>
-                e.categories && e.categories.some(c => categorySet.has(c))
-            );
-        }
-
-        // Status filter
-        if (filters.status) {
-            filtered = filtered.filter(e => e.status === filters.status);
-        }
-
-        // Modified only filter
-        if (filters.modifiedOnly) {
-            filtered = filtered.filter(e => {
-                const modifications = this.recurrenceEngine.modifiedInstances.get(e.id);
-                return modifications && modifications.size > 0;
-            });
-        }
-
-        return filtered;
+    // Status filter
+    if (filters.status) {
+      filtered = filtered.filter(e => e.status === filters.status);
     }
 
-    /**
-     * Setup real-time indexing for search
-     */
-    setupRealtimeIndexing() {
-        // Re-index when events are added
-        this.on('event:added', (event) => {
-            this.searchManager.indexEvents();
-        });
-
-        // Re-index when events are modified
-        this.on('event:updated', (event) => {
-            this.searchManager.indexEvents();
-        });
-
-        // Re-index when events are removed
-        this.on('event:removed', (eventId) => {
-            this.searchManager.indexEvents();
-        });
-
-        // Batch re-indexing for bulk operations
-        let reindexTimeout;
-        this.on('events:bulk-operation', () => {
-            clearTimeout(reindexTimeout);
-            reindexTimeout = setTimeout(() => {
-                this.searchManager.indexEvents();
-            }, 100);
-        });
+    // Modified only filter
+    if (filters.modifiedOnly) {
+      filtered = filtered.filter(e => {
+        const modifications = this.recurrenceEngine.modifiedInstances.get(e.id);
+        return modifications && modifications.size > 0;
+      });
     }
 
-    /**
-     * Get search suggestions (autocomplete)
-     */
-    async getSuggestions(partial, field = 'title') {
-        if (partial.length < 2) {
-            return [];
-        }
+    return filtered;
+  }
 
-        // Use search with prefix matching
-        const results = await this.searchManager.search(partial, {
-            fields: [field],
-            prefixMatch: true,
-            limit: 10
-        });
+  /**
+   * Setup real-time indexing for search
+   */
+  setupRealtimeIndexing() {
+    // Re-index when events are added
+    this.on('event:added', event => {
+      this.searchManager.indexEvents();
+    });
 
-        // Extract unique values
-        const suggestions = new Set();
-        for (const result of results) {
-            const value = result.event[field];
-            if (value) {
-                suggestions.add(value);
-            }
-        }
+    // Re-index when events are modified
+    this.on('event:updated', event => {
+      this.searchManager.indexEvents();
+    });
 
-        return Array.from(suggestions);
+    // Re-index when events are removed
+    this.on('event:removed', eventId => {
+      this.searchManager.indexEvents();
+    });
+
+    // Batch re-indexing for bulk operations
+    let reindexTimeout;
+    this.on('events:bulk-operation', () => {
+      clearTimeout(reindexTimeout);
+      reindexTimeout = setTimeout(() => {
+        this.searchManager.indexEvents();
+      }, 100);
+    });
+  }
+
+  /**
+   * Get search suggestions (autocomplete)
+   */
+  async getSuggestions(partial, field = 'title') {
+    if (partial.length < 2) {
+      return [];
     }
 
-    /**
-     * Performance monitoring
-     */
-    recordMetric(type, value) {
-        this.performanceMetrics[type].push(value);
+    // Use search with prefix matching
+    const results = await this.searchManager.search(partial, {
+      fields: [field],
+      prefixMatch: true,
+      limit: 10
+    });
 
-        // Keep only last 100 measurements
-        if (this.performanceMetrics[type].length > 100) {
-            this.performanceMetrics[type].shift();
-        }
+    // Extract unique values
+    const suggestions = new Set();
+    for (const result of results) {
+      const value = result.event[field];
+      if (value) {
+        suggestions.add(value);
+      }
     }
 
-    /**
-     * Get performance statistics
-     */
-    getPerformanceStats() {
-        const stats = {};
+    return Array.from(suggestions);
+  }
 
-        for (const [metric, values] of Object.entries(this.performanceMetrics)) {
-            if (values.length === 0) {
-                stats[metric] = { avg: 0, min: 0, max: 0, p95: 0 };
-                continue;
-            }
+  /**
+   * Performance monitoring
+   */
+  recordMetric(type, value) {
+    this.performanceMetrics[type].push(value);
 
-            const sorted = [...values].sort((a, b) => a - b);
-            const sum = sorted.reduce((a, b) => a + b, 0);
+    // Keep only last 100 measurements
+    if (this.performanceMetrics[type].length > 100) {
+      this.performanceMetrics[type].shift();
+    }
+  }
 
-            stats[metric] = {
-                avg: sum / sorted.length,
-                min: sorted[0],
-                max: sorted[sorted.length - 1],
-                p95: sorted[Math.floor(sorted.length * 0.95)]
-            };
-        }
+  /**
+   * Get performance statistics
+   */
+  getPerformanceStats() {
+    const stats = {};
 
-        return stats;
+    for (const [metric, values] of Object.entries(this.performanceMetrics)) {
+      if (values.length === 0) {
+        stats[metric] = { avg: 0, min: 0, max: 0, p95: 0 };
+        continue;
+      }
+
+      const sorted = [...values].sort((a, b) => a - b);
+      const sum = sorted.reduce((a, b) => a + b, 0);
+
+      stats[metric] = {
+        avg: sum / sorted.length,
+        min: sorted[0],
+        max: sorted[sorted.length - 1],
+        p95: sorted[Math.floor(sorted.length * 0.95)]
+      };
     }
 
-    /**
-     * Export calendar with recurrence data
-     */
-    exportWithRecurrence(format = 'json') {
-        const data = {
-            events: this.eventStore.getAllEvents(),
-            modifiedInstances: {},
-            exceptions: {}
-        };
+    return stats;
+  }
 
-        // Include modified instances
-        for (const [eventId, modifications] of this.recurrenceEngine.modifiedInstances) {
-            data.modifiedInstances[eventId] = Array.from(modifications.entries());
-        }
+  /**
+   * Export calendar with recurrence data
+   */
+  exportWithRecurrence(format = 'json') {
+    const data = {
+      events: this.eventStore.getAllEvents(),
+      modifiedInstances: {},
+      exceptions: {}
+    };
 
-        // Include exceptions
-        for (const [eventId, exceptions] of this.recurrenceEngine.exceptionStore) {
-            data.exceptions[eventId] = Array.from(exceptions.entries());
-        }
-
-        if (format === 'json') {
-            return JSON.stringify(data, null, 2);
-        }
-
-        // Could add ICS export here
-        return data;
+    // Include modified instances
+    for (const [eventId, modifications] of this.recurrenceEngine.modifiedInstances) {
+      data.modifiedInstances[eventId] = Array.from(modifications.entries());
     }
 
-    /**
-     * Import calendar with recurrence data
-     */
-    importWithRecurrence(data, format = 'json') {
-        if (format === 'json') {
-            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-
-            // Import events
-            for (const event of parsed.events) {
-                this.addEvent(event);
-            }
-
-            // Import modified instances
-            if (parsed.modifiedInstances) {
-                for (const [eventId, modifications] of Object.entries(parsed.modifiedInstances)) {
-                    for (const [dateKey, mods] of modifications) {
-                        this.recurrenceEngine.addModifiedInstance(
-                            eventId,
-                            new Date(dateKey),
-                            mods
-                        );
-                    }
-                }
-            }
-
-            // Import exceptions
-            if (parsed.exceptions) {
-                for (const [eventId, exceptions] of Object.entries(parsed.exceptions)) {
-                    for (const [dateKey, reason] of exceptions) {
-                        this.recurrenceEngine.addException(
-                            eventId,
-                            new Date(dateKey),
-                            reason
-                        );
-                    }
-                }
-            }
-        }
+    // Include exceptions
+    for (const [eventId, exceptions] of this.recurrenceEngine.exceptionStore) {
+      data.exceptions[eventId] = Array.from(exceptions.entries());
     }
 
-    /**
-     * Clean up resources
-     */
-    destroy() {
-        // Clean up worker
-        if (this.searchManager) {
-            this.searchManager.destroy();
-        }
-
-        // Clear caches
-        if (this.recurrenceEngine) {
-            this.recurrenceEngine.occurrenceCache.clear();
-        }
-
-        // Call parent destroy if exists
-        if (super.destroy) {
-            super.destroy();
-        }
+    if (format === 'json') {
+      return JSON.stringify(data, null, 2);
     }
+
+    // Could add ICS export here
+    return data;
+  }
+
+  /**
+   * Import calendar with recurrence data
+   */
+  importWithRecurrence(data, format = 'json') {
+    if (format === 'json') {
+      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+
+      // Import events
+      for (const event of parsed.events) {
+        this.addEvent(event);
+      }
+
+      // Import modified instances
+      if (parsed.modifiedInstances) {
+        for (const [eventId, modifications] of Object.entries(parsed.modifiedInstances)) {
+          for (const [dateKey, mods] of modifications) {
+            this.recurrenceEngine.addModifiedInstance(eventId, new Date(dateKey), mods);
+          }
+        }
+      }
+
+      // Import exceptions
+      if (parsed.exceptions) {
+        for (const [eventId, exceptions] of Object.entries(parsed.exceptions)) {
+          for (const [dateKey, reason] of exceptions) {
+            this.recurrenceEngine.addException(eventId, new Date(dateKey), reason);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Clean up resources
+   */
+  destroy() {
+    // Clean up worker
+    if (this.searchManager) {
+      this.searchManager.destroy();
+    }
+
+    // Clear caches
+    if (this.recurrenceEngine) {
+      this.recurrenceEngine.occurrenceCache.clear();
+    }
+
+    // Call parent destroy if exists
+    if (super.destroy) {
+      super.destroy();
+    }
+  }
 }
 
 // Usage Example
 export function createEnhancedCalendar(config) {
-    const calendar = new EnhancedCalendar(config);
+  const calendar = new EnhancedCalendar(config);
 
-    // Example: Add a complex recurring event
-    calendar.addEvent({
-        id: 'meeting-1',
-        title: 'Weekly Team Standup',
-        start: new Date('2024-01-01T10:00:00'),
-        end: new Date('2024-01-01T10:30:00'),
-        recurring: true,
-        recurrenceRule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20241231T235959Z',
-        timeZone: 'America/New_York',
-        categories: ['meetings', 'team']
+  // Example: Add a complex recurring event
+  calendar.addEvent({
+    id: 'meeting-1',
+    title: 'Weekly Team Standup',
+    start: new Date('2024-01-01T10:00:00'),
+    end: new Date('2024-01-01T10:30:00'),
+    recurring: true,
+    recurrenceRule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20241231T235959Z',
+    timeZone: 'America/New_York',
+    categories: ['meetings', 'team']
+  });
+
+  // Example: Modify a single occurrence
+  calendar.modifyOccurrence('meeting-1', new Date('2024-01-08T10:00:00'), {
+    title: 'Extended Team Standup - Sprint Planning',
+    end: new Date('2024-01-08T11:30:00'),
+    location: 'Conference Room A'
+  });
+
+  // Example: Cancel an occurrence
+  calendar.cancelOccurrence('meeting-1', new Date('2024-01-15T10:00:00'), 'Public Holiday');
+
+  // Example: Advanced search
+  calendar
+    .advancedSearch('standup', {
+      dateRange: {
+        start: new Date('2024-01-01'),
+        end: new Date('2024-01-31')
+      },
+      categories: ['meetings'],
+      modifiedOnly: false
+    })
+    .then(results => {
+      console.log('Search results:', results);
     });
 
-    // Example: Modify a single occurrence
-    calendar.modifyOccurrence(
-        'meeting-1',
-        new Date('2024-01-08T10:00:00'),
-        {
-            title: 'Extended Team Standup - Sprint Planning',
-            end: new Date('2024-01-08T11:30:00'),
-            location: 'Conference Room A'
-        }
-    );
-
-    // Example: Cancel an occurrence
-    calendar.cancelOccurrence(
-        'meeting-1',
-        new Date('2024-01-15T10:00:00'),
-        'Public Holiday'
-    );
-
-    // Example: Advanced search
-    calendar.advancedSearch('standup', {
-        dateRange: {
-            start: new Date('2024-01-01'),
-            end: new Date('2024-01-31')
-        },
-        categories: ['meetings'],
-        modifiedOnly: false
-    }).then(results => {
-        console.log('Search results:', results);
-    });
-
-    return calendar;
+  return calendar;
 }
 
 export default EnhancedCalendar;

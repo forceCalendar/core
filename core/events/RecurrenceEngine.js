@@ -138,11 +138,11 @@ export class RecurrenceEngine {
           if (iterations >= maxIterations) {
             console.warn('RecurrenceEngine: Invalid byDay rule, falling back to weekly interval');
             // Reset to original and add weekly interval
-            next.setDate(originalDate + (7 * rule.interval));
+            next.setDate(originalDate + 7 * rule.interval);
           }
         } else {
           // Simple weekly recurrence
-          next.setDate(next.getDate() + (7 * rule.interval));
+          next.setDate(next.getDate() + 7 * rule.interval);
         }
         break;
 
@@ -173,7 +173,7 @@ export class RecurrenceEngine {
 
       default:
         // Unsupported frequency
-        next.setTime(next.getTime() + (24 * 60 * 60 * 1000)); // Daily fallback
+        next.setTime(next.getTime() + 24 * 60 * 60 * 1000); // Daily fallback
     }
 
     return next;
@@ -187,8 +187,13 @@ export class RecurrenceEngine {
    */
   static matchesByDay(date, byDay) {
     const dayMap = {
-      'SU': 0, 'MO': 1, 'TU': 2, 'WE': 3,
-      'TH': 4, 'FR': 5, 'SA': 6
+      SU: 0,
+      MO: 1,
+      TU: 2,
+      WE: 3,
+      TH: 4,
+      FR: 5,
+      SA: 6
     };
 
     const dayOfWeek = date.getDay();
@@ -211,8 +216,13 @@ export class RecurrenceEngine {
    */
   static setToWeekdayOfMonth(date, weekday, position = 1) {
     const dayMap = {
-      'SU': 0, 'MO': 1, 'TU': 2, 'WE': 3,
-      'TH': 4, 'FR': 5, 'SA': 6
+      SU: 0,
+      MO: 1,
+      TU: 2,
+      WE: 3,
+      TH: 4,
+      FR: 5,
+      SA: 6
     };
 
     // Extract weekday code if it has a number prefix
@@ -229,7 +239,7 @@ export class RecurrenceEngine {
 
     // Move to the nth occurrence
     if (position > 1) {
-      date.setDate(date.getDate() + (7 * (position - 1)));
+      date.setDate(date.getDate() + 7 * (position - 1));
     } else if (position === -1) {
       // Last occurrence of the month
       const nextMonth = new Date(date);
@@ -267,11 +277,10 @@ export class RecurrenceEngine {
           return Math.abs(exceptionDate.getTime() - dateTime) < 1000; // Within 1 second
         }
         return exceptionDate.toDateString() === dateStr;
-      } 
-        // Simple date exception
-        const exceptionDate = exDate instanceof Date ? exDate : new Date(exDate);
-        return exceptionDate.toDateString() === dateStr;
-      
+      }
+      // Simple date exception
+      const exceptionDate = exDate instanceof Date ? exDate : new Date(exDate);
+      return exceptionDate.toDateString() === dateStr;
     });
   }
 
@@ -327,9 +336,8 @@ export class RecurrenceEngine {
 
       if (dateStr.endsWith('Z')) {
         return new Date(Date.UTC(year, month, day, hour, minute, second));
-      } 
-        return new Date(year, month, day, hour, minute, second);
-      
+      }
+      return new Date(year, month, day, hour, minute, second);
     }
 
     // Fallback to standard date parsing
@@ -387,9 +395,13 @@ export class RecurrenceEngine {
    */
   static getDayName(dayCode) {
     const dayNames = {
-      'SU': 'Sunday', 'MO': 'Monday', 'TU': 'Tuesday',
-      'WE': 'Wednesday', 'TH': 'Thursday', 'FR': 'Friday',
-      'SA': 'Saturday'
+      SU: 'Sunday',
+      MO: 'Monday',
+      TU: 'Tuesday',
+      WE: 'Wednesday',
+      TH: 'Thursday',
+      FR: 'Friday',
+      SA: 'Saturday'
     };
 
     // Extract day code if it has a number prefix
@@ -401,7 +413,7 @@ export class RecurrenceEngine {
 
     if (position) {
       const ordinals = ['', '1st', '2nd', '3rd', '4th', '5th'];
-      const ordinal = position === -1 ? 'Last' : (ordinals[position] || `${position}th`);
+      const ordinal = position === -1 ? 'Last' : ordinals[position] || `${position}th`;
       name = `${ordinal} ${name}`;
     }
 

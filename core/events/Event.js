@@ -179,12 +179,12 @@ export class Event {
     organizer = null,
     attendees = [],
     reminders = [],
-    category,  // Support singular category (no default)
-    categories,  // Support plural categories (no default)
+    category, // Support singular category (no default)
+    categories, // Support plural categories (no default)
     attachments = [],
     conferenceData = null,
     metadata = {},
-    ...rest  // Capture any extra properties
+    ...rest // Capture any extra properties
   }) {
     // Normalize and validate input
     const normalized = Event.normalize({
@@ -208,12 +208,12 @@ export class Event {
       organizer,
       attendees,
       reminders,
-      category,  // Pass category to normalize
-      categories,  // Pass categories to normalize
+      category, // Pass category to normalize
+      categories, // Pass categories to normalize
       attachments,
       conferenceData,
       metadata,
-      ...rest  // Pass any extra properties
+      ...rest // Pass any extra properties
     });
 
     // Validate normalized data
@@ -417,10 +417,9 @@ export class Event {
       dayEnd.setHours(23, 59, 59, 999);
 
       return this.start <= dayEnd && this.end >= dayStart;
-    } 
-      // Single day event: check if it's on the same day
-      return startString === dateString;
-    
+    }
+    // Single day event: check if it's on the same day
+    return startString === dateString;
   }
 
   /**
@@ -436,9 +435,8 @@ export class Event {
     } else if (otherEvent && otherEvent.start && otherEvent.end) {
       // Allow checking against time ranges
       return !(this.end <= otherEvent.start || this.start >= otherEvent.end);
-    } 
-      throw new Error('Parameter must be an Event instance or have start/end properties');
-    
+    }
+    throw new Error('Parameter must be an Event instance or have start/end properties');
   }
 
   /**
@@ -586,9 +584,7 @@ export class Event {
    * @returns {boolean} True if attendee was removed
    */
   removeAttendee(emailOrId) {
-    const index = this.attendees.findIndex(
-      a => a.email === emailOrId || a.id === emailOrId
-    );
+    const index = this.attendees.findIndex(a => a.email === emailOrId || a.id === emailOrId);
 
     if (index !== -1) {
       this.attendees.splice(index, 1);
@@ -747,9 +743,7 @@ export class Event {
    */
   removeCategory(category) {
     const normalizedCategory = category.trim().toLowerCase();
-    const index = this.categories.findIndex(
-      c => c.toLowerCase() === normalizedCategory
-    );
+    const index = this.categories.findIndex(c => c.toLowerCase() === normalizedCategory);
 
     if (index !== -1) {
       this.categories.splice(index, 1);

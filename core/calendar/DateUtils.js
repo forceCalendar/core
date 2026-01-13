@@ -209,9 +209,11 @@ export class DateUtils {
    * @returns {boolean}
    */
   static isSameDay(date1, date2) {
-    return date1.getFullYear() === date2.getFullYear() &&
-           date1.getMonth() === date2.getMonth() &&
-           date1.getDate() === date2.getDate();
+    return (
+      date1.getFullYear() === date2.getFullYear() &&
+      date1.getMonth() === date2.getMonth() &&
+      date1.getDate() === date2.getDate()
+    );
   }
 
   /**
@@ -234,8 +236,7 @@ export class DateUtils {
    * @returns {boolean}
    */
   static isSameMonth(date1, date2) {
-    return date1.getFullYear() === date2.getFullYear() &&
-           date1.getMonth() === date2.getMonth();
+    return date1.getFullYear() === date2.getFullYear() && date1.getMonth() === date2.getMonth();
   }
 
   /**
@@ -389,7 +390,7 @@ export class DateUtils {
    * @returns {boolean}
    */
   static isLeapYear(year) {
-    return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+    return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
   }
 
   /**
@@ -504,7 +505,7 @@ export class DateUtils {
     const originalOffset = DateUtils.getTimezoneOffset(date, timeZone);
 
     // Add hours
-    result.setTime(result.getTime() + (hours * 60 * 60 * 1000));
+    result.setTime(result.getTime() + hours * 60 * 60 * 1000);
 
     // Check if DST transition occurred
     const newOffset = DateUtils.getTimezoneOffset(result, timeZone);
@@ -550,7 +551,7 @@ export class DateUtils {
 
     // Get offset and adjust
     const offset = DateUtils.getTimezoneOffset(localDate, timeZone);
-    const utcTime = localDate.getTime() + (offset * 60000);
+    const utcTime = localDate.getTime() + offset * 60000;
 
     return new Date(utcTime);
   }
