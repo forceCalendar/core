@@ -23,7 +23,8 @@ permissions:
 jobs:
   publish:
     # Avoid running on version bump commits created by this workflow
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # Check both commit message pattern and actor to prevent infinite loops
+    if: "!startsWith(github.event.head_commit.message, 'Release v') && github.actor != 'github-actions[bot]'"
     runs-on: ubuntu-latest
 
     steps:
@@ -118,7 +119,7 @@ jobs:
       if: steps.check_version.outputs.exists == 'false'
       run: |
         git add package.json package-lock.json
-        git commit -m "Release ${{ steps.version_bump.outputs.new_version }} [skip ci]"
+        git commit -m "Release ${{ steps.version_bump.outputs.new_version }}"
 
         # Only create tag if it doesn't already exist
         if ! git rev-parse "${{ steps.version_bump.outputs.new_version }}" >/dev/null 2>&1; then
