@@ -46,6 +46,8 @@ export class EventStore {
     this.isBatchMode = false;
     this.batchNotifications = [];
     this.batchBackup = null; // For rollback support
+    this._batchLock = null; // Lock to prevent concurrent batch operations
+    this._batchLockResolve = null; // Resolver for the batch lock
 
     // Change tracking
     /** @type {number} */
@@ -804,6 +806,22 @@ export class EventStore {
       }
     }
 
+    // Remove from category indices
+    for (const [category, eventIds] of this.indices.byCategory) {
+      eventIds.delete(event.id);
+      if (eventIds.size === 0) {
+        this.indices.byCategory.delete(category);
+      }
+    }
+
+    // Remove from status indices
+    for (const [status, eventIds] of this.indices.byStatus) {
+      eventIds.delete(event.id);
+      if (eventIds.size === 0) {
+        this.indices.byStatus.delete(status);
+      }
+    }
+
     // Remove from recurring index
     this.indices.recurring.delete(event.id);
   }
@@ -924,23 +942,44 @@ export class EventStore {
 
   /**
    * Execute batch operation with automatic rollback on error
+   * Uses a lock to prevent concurrent batch operations from corrupting state
    * @param {Function} operation - Operation to execute
    * @param {boolean} [enableRollback=true] - Enable automatic rollback on error
    * @returns {*} Result of operation
    * @throws {Error} If operation fails
    */
   async executeBatch(operation, enableRollback = true) {
-    this.startBatch(enableRollback);
+    // Wait for any existing batch operation to complete
+    while (this._batchLock) {
+      await this._batchLock;
+    }
+
+    // Acquire the lock
+    this._batchLock = new Promise(resolve => {
+      this._batchLockResolve = resolve;
+    });
 
     try {
-      const result = await operation();
-      this.commitBatch();
-      return result;
-    } catch (error) {
-      if (enableRollback) {
-        this.rollbackBatch();
+      this.startBatch(enableRollback);
+
+      try {
+        const result = await operation();
+        this.commitBatch();
+        return result;
+      } catch (error) {
+        if (enableRollback) {
+          this.rollbackBatch();
+        }
+        throw error;
       }
-      throw error;
+    } finally {
+      // Release the lock
+      const resolve = this._batchLockResolve;
+      this._batchLock = null;
+      this._batchLockResolve = null;
+      if (resolve) {
+        resolve();
+      }
     }
   }
 
