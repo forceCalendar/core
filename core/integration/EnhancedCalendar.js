@@ -64,7 +64,7 @@ export class EnhancedCalendar extends Calendar {
     const recurringEvents = [];
 
     // Separate regular and recurring events
-    const allEvents = this.eventStore.getEventsInDateRange(startDate, endDate);
+    const allEvents = this.eventStore.getEventsInRange(startDate, endDate, false);
 
     for (const event of allEvents) {
       if (event.recurring) {
@@ -107,14 +107,11 @@ export class EnhancedCalendar extends Calendar {
     this.recurrenceEngine.addModifiedInstance(eventId, occurrenceDate, modifications);
 
     // Emit change event
-    this.emit('occurrence:modified', {
+    this._emit('occurrenceModified', {
       eventId,
       occurrenceDate,
       modifications
     });
-
-    // Trigger re-render if in view
-    this.refreshView();
   }
 
   /**
@@ -125,14 +122,11 @@ export class EnhancedCalendar extends Calendar {
     this.recurrenceEngine.addException(eventId, occurrenceDate, reason);
 
     // Emit change event
-    this.emit('occurrence:cancelled', {
+    this._emit('occurrenceCancelled', {
       eventId,
       occurrenceDate,
       reason
     });
-
-    // Trigger re-render
-    this.refreshView();
   }
 
   /**
@@ -153,13 +147,11 @@ export class EnhancedCalendar extends Calendar {
     }
 
     // Emit bulk change event
-    this.emit('occurrences:bulk-modified', {
+    this._emit('occurrencesBulkModified', {
       eventId,
       count: occurrences.length,
       modifications
     });
-
-    this.refreshView();
   }
 
   /**
@@ -211,28 +203,33 @@ export class EnhancedCalendar extends Calendar {
    * Setup real-time indexing for search
    */
   setupRealtimeIndexing() {
-    // Re-index when events are added
-    this.on('event:added', event => {
-      this.searchManager.indexEvents();
-    });
-
-    // Re-index when events are modified
-    this.on('event:updated', event => {
-      this.searchManager.indexEvents();
-    });
-
-    // Re-index when events are removed
-    this.on('event:removed', eventId => {
-      this.searchManager.indexEvents();
-    });
-
-    // Batch re-indexing for bulk operations
-    let reindexTimeout;
-    this.on('events:bulk-operation', () => {
-      clearTimeout(reindexTimeout);
+    // Batch re-indexing to avoid rebuilding the index repeatedly for rapid event changes.
+    let reindexTimeout = null;
+    const scheduleReindex = () => {
+      if (reindexTimeout) {
+        clearTimeout(reindexTimeout);
+      }
       reindexTimeout = setTimeout(() => {
         this.searchManager.indexEvents();
       }, 100);
+    };
+
+    // Store cleanup handle so timers are cleared on destroy.
+    this._clearReindexTimeout = () => {
+      if (reindexTimeout) {
+        clearTimeout(reindexTimeout);
+        reindexTimeout = null;
+      }
+    };
+
+    this.on('eventAdd', scheduleReindex);
+    this.on('eventUpdate', scheduleReindex);
+    this.on('eventRemove', scheduleReindex);
+    this.on('eventsSet', scheduleReindex);
+    this.on('eventStoreChange', change => {
+      if (change?.type === 'batch') {
+        scheduleReindex();
+      }
     });
   }
 
@@ -365,6 +362,11 @@ export class EnhancedCalendar extends Calendar {
    * Clean up resources
    */
   destroy() {
+    if (typeof this._clearReindexTimeout === 'function') {
+      this._clearReindexTimeout();
+      this._clearReindexTimeout = null;
+    }
+
     // Clean up worker
     if (this.searchManager) {
       this.searchManager.destroy();
