@@ -152,7 +152,7 @@ export class EventSearch {
     // Recurring filter
     if (recurring !== null) {
       events = events.filter(event => {
-        const hasRecurrence = !!event.recurrence;
+        const hasRecurrence = !!(event.recurring || event.recurrenceRule || event.recurrence);
         return recurring ? hasRecurrence : !hasRecurrence;
       });
     }

@@ -59,6 +59,15 @@ export class Event {
 
     normalized.attachments = Array.isArray(normalized.attachments) ? normalized.attachments : [];
 
+    // Backward compatibility: support legacy "recurrence" alias.
+    // Canonical fields are "recurring" + "recurrenceRule".
+    if (normalized.recurrence && !normalized.recurrenceRule) {
+      normalized.recurrenceRule = normalized.recurrence;
+    }
+    if (normalized.recurrenceRule) {
+      normalized.recurring = true;
+    }
+
     // Normalize status and visibility
     const validStatuses = ['confirmed', 'tentative', 'cancelled'];
     if (!validStatuses.includes(normalized.status)) {
@@ -172,6 +181,7 @@ export class Event {
     textColor = null,
     recurring = false,
     recurrenceRule = null,
+    recurrence = null, // Backward-compatible alias for recurrenceRule
     timeZone = null,
     endTimeZone = null,
     status = 'confirmed',
@@ -201,6 +211,7 @@ export class Event {
       textColor,
       recurring,
       recurrenceRule,
+      recurrence,
       timeZone,
       endTimeZone,
       status,
@@ -391,6 +402,14 @@ export class Event {
   }
 
   /**
+   * Backward-compatible alias for recurrenceRule
+   * @returns {import('../../types.js').RecurrenceRule|string|null}
+   */
+  get recurrence() {
+    return this.recurrenceRule;
+  }
+
+  /**
    * Check if event occurs on a specific date
    * @param {Date|string} date - The date to check
    * @returns {boolean} True if event occurs on the given date
@@ -471,6 +490,7 @@ export class Event {
       textColor: this.textColor,
       recurring: this.recurring,
       recurrenceRule: this.recurrenceRule,
+      recurrence: this.recurrenceRule,
       timeZone: this.timeZone,
       status: this.status,
       visibility: this.visibility,

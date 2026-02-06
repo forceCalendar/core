@@ -133,7 +133,7 @@ export class ICSHandler {
     if (expandRecurring) {
       events = this.expandRecurringEvents(events, dateRange);
     } else if (!includeRecurring) {
-      events = events.filter(event => !event.recurrence);
+      events = events.filter(event => !(event.recurring || event.recurrenceRule || event.recurrence));
     }
 
     // Generate ICS
@@ -300,7 +300,7 @@ export class ICSHandler {
     const rangeEnd = dateRange?.end || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
 
     for (const event of events) {
-      if (!event.recurrence) {
+      if (!(event.recurring || event.recurrenceRule || event.recurrence)) {
         expanded.push(event);
         continue;
       }
@@ -321,6 +321,8 @@ export class ICSHandler {
           id: `${event.id}-${instance.start.getTime()}`,
           start: instance.start,
           end: instance.end,
+          recurring: false,
+          recurrenceRule: null,
           recurrence: null, // Remove recurrence from instances
           parentId: event.id // Reference to original
         });

@@ -22,7 +22,7 @@ export class ICSParser {
       TRANSP: 'showAs',
       ORGANIZER: 'organizer',
       ATTENDEE: 'attendees',
-      RRULE: 'recurrence',
+      RRULE: 'recurrenceRule',
       EXDATE: 'excludeDates'
     };
   }
@@ -184,17 +184,18 @@ export class ICSParser {
     }
 
     // Recurrence
-    if (event.recurrence) {
-      if (typeof event.recurrence === 'string') {
+    const recurrenceRule = event.recurrenceRule || event.recurrence;
+    if (recurrenceRule) {
+      if (typeof recurrenceRule === 'string') {
         // Already in RRULE format
-        if (event.recurrence.startsWith('RRULE:')) {
-          lines.push(event.recurrence);
+        if (recurrenceRule.startsWith('RRULE:')) {
+          lines.push(recurrenceRule);
         } else {
-          lines.push(`RRULE:${event.recurrence}`);
+          lines.push(`RRULE:${recurrenceRule}`);
         }
-      } else if (typeof event.recurrence === 'object') {
+      } else if (typeof recurrenceRule === 'object') {
         // Convert object to RRULE
-        lines.push(`RRULE:${this.objectToRRule(event.recurrence)}`);
+        lines.push(`RRULE:${this.objectToRRule(recurrenceRule)}`);
       }
     }
 
@@ -277,7 +278,8 @@ export class ICSParser {
       }
 
       case 'RRULE':
-        event.recurrence = value;
+        event.recurrenceRule = value;
+        event.recurring = true;
         break;
     }
   }
@@ -423,6 +425,8 @@ export class ICSParser {
       allDay: false,
       location: '',
       category: '',
+      recurring: false,
+      recurrenceRule: null,
       status: 'confirmed',
       showAs: 'busy',
       attendees: [],
