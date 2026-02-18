@@ -102,6 +102,13 @@ export class StateManager {
       updates = updates(oldState);
     }
 
+    // Sanitize keys to prevent prototype pollution
+    if (updates && typeof updates === 'object') {
+      delete updates.__proto__;
+      delete updates.constructor;
+      delete updates.prototype;
+    }
+
     // Create new state with updates
     const newState = {
       ...oldState,

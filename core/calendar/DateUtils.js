@@ -288,9 +288,13 @@ export class DateUtils {
    * @returns {number}
    */
   static getWeekNumber(date) {
-    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-    const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
-    return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+    // ISO 8601: week 1 is the week containing the first Thursday of the year
+    const target = new Date(date);
+    target.setHours(0, 0, 0, 0);
+    // Set to nearest Thursday (current date + 4 - current day number, with Sunday as 7)
+    target.setDate(target.getDate() + 4 - (target.getDay() || 7));
+    const yearStart = new Date(target.getFullYear(), 0, 1);
+    return Math.ceil(((target - yearStart) / 86400000 + 1) / 7);
   }
 
   /**
