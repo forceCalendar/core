@@ -110,7 +110,7 @@ export class TimezoneManager {
     timezone = this.database.resolveAlias(timezone);
 
     // Check cache first
-    const cacheKey = `${timezone}_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}`;
+    const cacheKey = `${timezone}_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}_${date.getHours()}`;
     if (this.offsetCache.has(cacheKey)) {
       this.cacheHits++;
       this._manageCacheSize();
