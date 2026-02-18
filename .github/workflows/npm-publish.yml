@@ -15,6 +15,10 @@ on:
           - minor
           - major
 
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
 permissions:
   contents: write
   packages: write
@@ -126,6 +130,7 @@ jobs:
           git tag ${{ steps.version_bump.outputs.new_version }}
         fi
 
+        git pull --rebase origin master
         git push origin HEAD --tags
 
         # Create an official GitHub Release (only if it doesn't exist)
