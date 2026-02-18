@@ -415,33 +415,32 @@ export class EventStore {
       events = events.filter(e => !e.allDay);
     }
 
+    if (events.length === 0) return [];
+
+    // Sweep-line approach: sort by start, then merge overlapping intervals
+    // O(n log n) instead of O(n²)
+    events.sort((a, b) => a.start - b.start || b.end - a.end);
+
     const groups = [];
-    const processed = new Set();
+    let currentGroup = [events[0]];
+    let groupEnd = events[0].end;
 
-    events.forEach(event => {
-      if (processed.has(event.id)) return;
-
-      // Start a new group with this event
-      const group = [event];
-      processed.add(event.id);
-
-      // Find all events that overlap with any event in this group
-      let i = 0;
-      while (i < group.length) {
-        const currentEvent = group[i];
-
-        events.forEach(otherEvent => {
-          if (!processed.has(otherEvent.id) && currentEvent.overlaps(otherEvent)) {
-            group.push(otherEvent);
-            processed.add(otherEvent.id);
-          }
-        });
-
-        i++;
+    for (let i = 1; i < events.length; i++) {
+      const event = events[i];
+      if (event.start < groupEnd) {
+        // Overlaps with current group
+        currentGroup.push(event);
+        if (event.end > groupEnd) {
+          groupEnd = event.end;
+        }
+      } else {
+        // No overlap — start new group
+        groups.push(currentGroup);
+        currentGroup = [event];
+        groupEnd = event.end;
       }
-
-      groups.push(group);
-    });
+    }
+    groups.push(currentGroup);
 
     return groups;
   }
