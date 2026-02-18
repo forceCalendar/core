@@ -504,15 +504,24 @@ export class EventStore {
    * Get events for a date range
    * @param {Date} start - Start date
    * @param {Date} end - End date
-   * @param {boolean|string} expandRecurring - Whether to expand recurring events, or timezone string
-   * @param {string} [timezone] - Timezone for the query (if expandRecurring is boolean)
+   * @param {boolean|Object} [expandRecurringOrOptions=true] - Boolean to expand recurring events,
+   *   or options object: { expandRecurring?: boolean, timezone?: string }
+   * @param {string} [timezone] - Timezone for the query
    * @returns {Event[]}
    */
-  getEventsInRange(start, end, expandRecurring = true, timezone = null) {
-    // Handle overloaded parameters
-    if (typeof expandRecurring === 'string') {
-      timezone = expandRecurring;
+  getEventsInRange(start, end, expandRecurringOrOptions = true, timezone = null) {
+    let expandRecurring = true;
+
+    if (typeof expandRecurringOrOptions === 'object' && expandRecurringOrOptions !== null) {
+      // Options object form: getEventsInRange(start, end, { expandRecurring, timezone })
+      expandRecurring = expandRecurringOrOptions.expandRecurring !== false;
+      timezone = expandRecurringOrOptions.timezone || timezone;
+    } else if (typeof expandRecurringOrOptions === 'string') {
+      // Legacy overloaded form: string was treated as timezone (deprecated)
+      timezone = expandRecurringOrOptions;
       expandRecurring = true;
+    } else {
+      expandRecurring = expandRecurringOrOptions;
     }
 
     timezone = timezone || this.defaultTimezone;
