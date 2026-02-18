@@ -278,8 +278,13 @@ export class RecurrenceEngine {
         }
         return exceptionDate.toDateString() === dateStr;
       }
-      // Simple date exception
+      // Simple date exception — if the exception has a specific time component
+      // (not midnight), match by timestamp to avoid excluding all occurrences on that day
       const exceptionDate = exDate instanceof Date ? exDate : new Date(exDate);
+      const hasTime = exceptionDate.getHours() !== 0 || exceptionDate.getMinutes() !== 0 || exceptionDate.getSeconds() !== 0;
+      if (hasTime) {
+        return Math.abs(exceptionDate.getTime() - dateTime) < 1000;
+      }
       return exceptionDate.toDateString() === dateStr;
     });
   }
