@@ -39,8 +39,7 @@ export class RecurrenceEngine {
     // Track DST transitions for proper timezone handling
     let lastOffset = tzManager.getTimezoneOffset(currentDate, eventTimezone);
 
-    // Track last date to detect infinite loop (date not advancing)
-    const lastDateTimestamp = null;
+    // Track stuck iterations to detect infinite loop (date not advancing)
     let stuckCount = 0;
     const maxStuckIterations = 3;
 
