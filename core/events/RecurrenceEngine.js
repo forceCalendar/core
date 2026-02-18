@@ -165,6 +165,18 @@ export class RecurrenceEngine {
     const next = new Date(currentDate);
 
     switch (rule.freq) {
+      case 'SECONDLY':
+        next.setSeconds(next.getSeconds() + rule.interval);
+        break;
+
+      case 'MINUTELY':
+        next.setMinutes(next.getMinutes() + rule.interval);
+        break;
+
+      case 'HOURLY':
+        next.setHours(next.getHours() + rule.interval);
+        break;
+
       case 'DAILY':
         next.setDate(next.getDate() + rule.interval);
         break;

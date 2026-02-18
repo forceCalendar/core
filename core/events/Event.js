@@ -154,10 +154,18 @@ export class Event {
     // Validate timezone if provided
     if (data.timeZone) {
       try {
-        // Test if timezone is valid by trying to use it
         new Intl.DateTimeFormat('en-US', { timeZone: data.timeZone });
       } catch (e) {
         throw new Error(`Invalid timezone: ${data.timeZone}`);
+      }
+    }
+
+    // Validate end timezone if provided
+    if (data.endTimeZone) {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: data.endTimeZone });
+      } catch (e) {
+        throw new Error(`Invalid end timezone: ${data.endTimeZone}`);
       }
     }
   }

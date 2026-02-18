@@ -415,33 +415,32 @@ export class EventStore {
       events = events.filter(e => !e.allDay);
     }
 
+    if (events.length === 0) return [];
+
+    // Sweep-line approach: sort by start, then merge overlapping intervals
+    // O(n log n) instead of O(n²)
+    events.sort((a, b) => a.start - b.start || b.end - a.end);
+
     const groups = [];
-    const processed = new Set();
+    let currentGroup = [events[0]];
+    let groupEnd = events[0].end;
 
-    events.forEach(event => {
-      if (processed.has(event.id)) return;
-
-      // Start a new group with this event
-      const group = [event];
-      processed.add(event.id);
-
-      // Find all events that overlap with any event in this group
-      let i = 0;
-      while (i < group.length) {
-        const currentEvent = group[i];
-
-        events.forEach(otherEvent => {
-          if (!processed.has(otherEvent.id) && currentEvent.overlaps(otherEvent)) {
-            group.push(otherEvent);
-            processed.add(otherEvent.id);
-          }
-        });
-
-        i++;
+    for (let i = 1; i < events.length; i++) {
+      const event = events[i];
+      if (event.start < groupEnd) {
+        // Overlaps with current group
+        currentGroup.push(event);
+        if (event.end > groupEnd) {
+          groupEnd = event.end;
+        }
+      } else {
+        // No overlap — start new group
+        groups.push(currentGroup);
+        currentGroup = [event];
+        groupEnd = event.end;
       }
-
-      groups.push(group);
-    });
+    }
+    groups.push(currentGroup);
 
     return groups;
   }
@@ -504,15 +503,24 @@ export class EventStore {
    * Get events for a date range
    * @param {Date} start - Start date
    * @param {Date} end - End date
-   * @param {boolean|string} expandRecurring - Whether to expand recurring events, or timezone string
-   * @param {string} [timezone] - Timezone for the query (if expandRecurring is boolean)
+   * @param {boolean|Object} [expandRecurringOrOptions=true] - Boolean to expand recurring events,
+   *   or options object: { expandRecurring?: boolean, timezone?: string }
+   * @param {string} [timezone] - Timezone for the query
    * @returns {Event[]}
    */
-  getEventsInRange(start, end, expandRecurring = true, timezone = null) {
-    // Handle overloaded parameters
-    if (typeof expandRecurring === 'string') {
-      timezone = expandRecurring;
+  getEventsInRange(start, end, expandRecurringOrOptions = true, timezone = null) {
+    let expandRecurring = true;
+
+    if (typeof expandRecurringOrOptions === 'object' && expandRecurringOrOptions !== null) {
+      // Options object form: getEventsInRange(start, end, { expandRecurring, timezone })
+      expandRecurring = expandRecurringOrOptions.expandRecurring !== false;
+      timezone = expandRecurringOrOptions.timezone || timezone;
+    } else if (typeof expandRecurringOrOptions === 'string') {
+      // Legacy overloaded form: string was treated as timezone (deprecated)
+      timezone = expandRecurringOrOptions;
       expandRecurring = true;
+    } else {
+      expandRecurring = expandRecurringOrOptions;
     }
 
     timezone = timezone || this.defaultTimezone;

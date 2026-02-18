@@ -1,6 +1,6 @@
 {
   "name": "@forcecalendar/core",
-  "version": "2.1.10",
+  "version": "2.1.14",
   "type": "module",
   "private": false,
   "description": "A modern, lightweight, framework-agnostic calendar engine optimized for Salesforce",
