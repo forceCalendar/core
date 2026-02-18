@@ -1010,7 +1010,7 @@ export class EventStore {
    */
   addEvents(events) {
     return this.optimizer.measure('addEvents', () => {
-      this.startBatch();
+      this.startBatch(true);
       const results = [];
       const errors = [];
 
@@ -1022,7 +1022,11 @@ export class EventStore {
         }
       }
 
-      this.commitBatch();
+      if (errors.length > 0 && results.length === 0) {
+        this.rollbackBatch();
+      } else {
+        this.commitBatch();
+      }
 
       if (errors.length > 0) {
         console.warn(`Failed to add ${errors.length} events:`, errors);
@@ -1039,7 +1043,7 @@ export class EventStore {
    */
   updateEvents(updates) {
     return this.optimizer.measure('updateEvents', () => {
-      this.startBatch();
+      this.startBatch(true);
       const results = [];
       const errors = [];
 
@@ -1051,7 +1055,11 @@ export class EventStore {
         }
       }
 
-      this.commitBatch();
+      if (errors.length > 0 && results.length === 0) {
+        this.rollbackBatch();
+      } else {
+        this.commitBatch();
+      }
 
       if (errors.length > 0) {
         console.warn(`Failed to update ${errors.length} events:`, errors);
@@ -1068,7 +1076,7 @@ export class EventStore {
    */
   removeEvents(eventIds) {
     return this.optimizer.measure('removeEvents', () => {
-      this.startBatch();
+      this.startBatch(true);
       let removed = 0;
 
       for (const id of eventIds) {
@@ -1077,7 +1085,11 @@ export class EventStore {
         }
       }
 
-      this.commitBatch();
+      if (removed === 0 && eventIds.length > 0) {
+        this.rollbackBatch();
+      } else {
+        this.commitBatch();
+      }
       return removed;
     });
   }
