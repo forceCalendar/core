@@ -731,23 +731,29 @@ export class Calendar {
    * Destroy the calendar and clean up
    */
   destroy() {
+    // Emit destroy event before clearing listeners
+    this._emit('destroy');
+
     // Clear all listeners
     this.listeners.clear();
 
     // Properly destroy EventStore (clears events, caches, and cleanup timers)
     this.eventStore.destroy();
 
-    // Clear plugins
+    // Clear plugins — wrap each uninstall in try-catch so one failure
+    // doesn't prevent cleanup of remaining plugins
     this.plugins.forEach(plugin => {
       if (typeof plugin.uninstall === 'function') {
-        plugin.uninstall(this);
+        try {
+          plugin.uninstall(this);
+        } catch (error) {
+          console.error('Error uninstalling plugin:', error);
+        }
       }
     });
     this.plugins.clear();
 
     // Clear view instances
     this.views.clear();
-
-    this._emit('destroy');
   }
 } // Test workflow

@@ -94,7 +94,54 @@ export class RecurrenceEngine {
       }
     }
 
+    // Apply BYSETPOS filtering if present and not already handled by MONTHLY+byDay
+    if (rule.bySetPos && rule.bySetPos.length > 0 && rule.freq !== 'MONTHLY') {
+      return this._applyBySetPos(occurrences, rule);
+    }
+
     return occurrences;
+  }
+
+  /**
+   * Apply BYSETPOS to filter occurrences within each frequency period
+   * @param {Array} occurrences - Generated occurrences
+   * @param {Object} rule - Recurrence rule
+   * @returns {Array} Filtered occurrences
+   * @private
+   */
+  static _applyBySetPos(occurrences, rule) {
+    if (occurrences.length === 0) return occurrences;
+
+    // Group occurrences by period
+    const groups = new Map();
+    for (const occ of occurrences) {
+      let key;
+      switch (rule.freq) {
+        case 'YEARLY':
+          key = occ.start.getFullYear();
+          break;
+        case 'WEEKLY':
+          key = `${occ.start.getFullYear()}-W${DateUtils.getWeekNumber(occ.start)}`;
+          break;
+        default:
+          key = `${occ.start.getFullYear()}-${occ.start.getMonth()}`;
+      }
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(occ);
+    }
+
+    // Filter each group by BYSETPOS positions
+    const filtered = [];
+    for (const group of groups.values()) {
+      for (const pos of rule.bySetPos) {
+        const idx = pos > 0 ? pos - 1 : group.length + pos;
+        if (idx >= 0 && idx < group.length) {
+          filtered.push(group[idx]);
+        }
+      }
+    }
+
+    return filtered.sort((a, b) => a.start - b.start);
   }
 
   /**
@@ -163,11 +210,19 @@ export class RecurrenceEngine {
           // Specific day(s) of month
           const currentMonth = next.getMonth();
           next.setMonth(currentMonth + rule.interval);
-          next.setDate(rule.byMonthDay[0]); // Use first specified day
+          // Clamp to last day of month if day doesn't exist
+          const daysInMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+          next.setDate(Math.min(rule.byMonthDay[0], daysInMonth));
         } else if (rule.byDay && rule.byDay.length > 0) {
           // Specific weekday of month (e.g., "2nd Tuesday")
           next.setMonth(next.getMonth() + rule.interval);
-          this.setToWeekdayOfMonth(next, rule.byDay[0], rule.bySetPos[0] || 1);
+          // Extract position from the day code itself (e.g., "2TU" -> pos=2)
+          // or fall back to bySetPos
+          const dayCode = rule.byDay[0];
+          const dayMatch = dayCode.match(/^(-?\d+)?([A-Z]{2})$/);
+          const embeddedPos = dayMatch && dayMatch[1] ? parseInt(dayMatch[1], 10) : null;
+          const pos = embeddedPos || (rule.bySetPos && rule.bySetPos[0]) || 1;
+          this.setToWeekdayOfMonth(next, rule.byDay[0], pos);
         } else {
           // Same day of month
           next.setMonth(next.getMonth() + rule.interval);
