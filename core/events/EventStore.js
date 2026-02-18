@@ -122,6 +122,13 @@ export class EventStore {
     // Store updated event
     this.events.set(eventId, updatedEvent);
 
+    // Update cache with new event data
+    this.optimizer.cache(eventId, updatedEvent, 'event');
+
+    // Clear query and date range caches since results may have changed
+    this.optimizer.queryCache.clear();
+    this.optimizer.dateRangeCache.clear();
+
     // Re-index
     this._indexEvent(updatedEvent);
 
@@ -149,6 +156,11 @@ export class EventStore {
 
     // Remove from primary storage
     this.events.delete(eventId);
+
+    // Invalidate caches
+    this.optimizer.eventCache.delete(eventId);
+    this.optimizer.queryCache.clear();
+    this.optimizer.dateRangeCache.clear();
 
     // Remove from indices
     this._unindexEvent(event);
