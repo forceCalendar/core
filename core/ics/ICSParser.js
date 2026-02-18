@@ -160,7 +160,9 @@ export class ICSParser {
     }
 
     // Categories
-    if (event.category) {
+    if (event.categories && event.categories.length > 0) {
+      lines.push(`CATEGORIES:${event.categories.join(',')}`);
+    } else if (event.category) {
       lines.push(`CATEGORIES:${event.category}`);
     }
 
@@ -246,7 +248,8 @@ export class ICSParser {
         break;
 
       case 'CATEGORIES':
-        event.category = value.split(',')[0]; // Take first category
+        event.categories = value.split(',').map(c => c.trim());
+        event.category = event.categories[0];
         break;
 
       case 'STATUS': {
