@@ -133,7 +133,9 @@ export class ICSHandler {
     if (expandRecurring) {
       events = this.expandRecurringEvents(events, dateRange);
     } else if (!includeRecurring) {
-      events = events.filter(event => !(event.recurring || event.recurrenceRule || event.recurrence));
+      events = events.filter(
+        event => !(event.recurring || event.recurrenceRule || event.recurrence)
+      );
     }
 
     // Generate ICS
