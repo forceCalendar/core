@@ -10,9 +10,37 @@ export class EventSearch {
     // Search index for performance
     this.searchIndex = new Map();
     this.indexFields = ['title', 'description', 'location', 'category'];
+    this._indexDirty = false;
 
     // Build initial index
     this.rebuildIndex();
+
+    // Subscribe to EventStore changes to keep index in sync
+    if (this.eventStore && typeof this.eventStore.subscribe === 'function') {
+      this._unsubscribe = this.eventStore.subscribe(change => {
+        if (change.type === 'batch') {
+          this._indexDirty = true;
+        } else if (
+          change.type === 'add' ||
+          change.type === 'update' ||
+          change.type === 'remove' ||
+          change.type === 'clear'
+        ) {
+          this._indexDirty = true;
+        }
+      });
+    }
+  }
+
+  /**
+   * Destroy the search engine and unsubscribe from store changes
+   */
+  destroy() {
+    if (this._unsubscribe) {
+      this._unsubscribe();
+      this._unsubscribe = null;
+    }
+    this.searchIndex.clear();
   }
 
   /**
@@ -33,6 +61,9 @@ export class EventSearch {
     if (!query || query.trim() === '') {
       return [];
     }
+
+    // Rebuild index if stale
+    this._ensureIndex();
 
     // Normalize query
     const normalizedQuery = caseSensitive ? query : query.toLowerCase();
@@ -444,10 +475,21 @@ export class EventSearch {
   }
 
   /**
+   * Ensure the search index is up to date
+   * @private
+   */
+  _ensureIndex() {
+    if (this._indexDirty) {
+      this.rebuildIndex();
+    }
+  }
+
+  /**
    * Rebuild search index
    */
   rebuildIndex() {
     this.searchIndex.clear();
+    this._indexDirty = false;
     const events = this.eventStore.getAllEvents();
 
     for (const event of events) {
