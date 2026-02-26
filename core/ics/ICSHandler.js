@@ -31,6 +31,13 @@ export class ICSHandler {
       // Get ICS string from input
       const icsString = await this.getICSString(input);
 
+      // Enforce input size limit before parsing
+      if (typeof icsString === 'string' && icsString.length > ICSParser.MAX_INPUT_SIZE) {
+        throw new Error(
+          `ICS input exceeds maximum size of ${ICSParser.MAX_INPUT_SIZE / (1024 * 1024)}MB`
+        );
+      }
+
       // Parse ICS to events
       const parsedEvents = this.parser.parse(icsString);
 

@@ -5,6 +5,11 @@
  */
 
 export class ICSParser {
+  // Size limits to prevent DoS attacks
+  static MAX_INPUT_SIZE = 50 * 1024 * 1024; // 50MB
+  static MAX_LINES = 100000; // 100k lines
+  static MAX_EVENTS = 10000; // 10k events
+
   constructor() {
     // ICS line folding max width
     this.maxLineLength = 75;
@@ -33,8 +38,21 @@ export class ICSParser {
    * @returns {Array} Array of event objects
    */
   parse(icsString) {
+    // Enforce input size limit
+    if (typeof icsString === 'string' && icsString.length > ICSParser.MAX_INPUT_SIZE) {
+      throw new Error(
+        `ICS input exceeds maximum size of ${ICSParser.MAX_INPUT_SIZE / (1024 * 1024)}MB`
+      );
+    }
+
     const events = [];
     const lines = this.unfoldLines(icsString);
+
+    // Enforce line count limit
+    if (lines.length > ICSParser.MAX_LINES) {
+      throw new Error(`ICS input exceeds maximum of ${ICSParser.MAX_LINES} lines`);
+    }
+
     let currentEvent = null;
     let inEvent = false;
     let inAlarm = false;
@@ -57,6 +75,10 @@ export class ICSParser {
       // Handle component boundaries
       if (property === 'BEGIN') {
         if (value === 'VEVENT') {
+          // Enforce event count limit
+          if (events.length >= ICSParser.MAX_EVENTS) {
+            throw new Error(`ICS input exceeds maximum of ${ICSParser.MAX_EVENTS} events`);
+          }
           inEvent = true;
           currentEvent = this.createEmptyEvent();
         } else if (value === 'VALARM') {
