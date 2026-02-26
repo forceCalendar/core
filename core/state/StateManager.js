@@ -102,23 +102,25 @@ export class StateManager {
       updates = updates(oldState);
     }
 
-    // Sanitize keys to prevent prototype pollution
+    // Deep sanitize to prevent prototype pollution
     if (updates && typeof updates === 'object') {
-      delete updates.__proto__;
-      delete updates.constructor;
-      delete updates.prototype;
+      updates = StateManager._deepSanitize(updates);
     }
 
     // Create new state with updates
     const newState = {
       ...oldState,
       ...updates,
-      // Preserve nested objects
-      filters: updates.filters ? { ...oldState.filters, ...updates.filters } : oldState.filters,
+      // Preserve nested objects (sanitization already applied to updates)
+      filters: updates.filters
+        ? { ...oldState.filters, ...StateManager._deepSanitize(updates.filters) }
+        : oldState.filters,
       businessHours: updates.businessHours
-        ? { ...oldState.businessHours, ...updates.businessHours }
+        ? { ...oldState.businessHours, ...StateManager._deepSanitize(updates.businessHours) }
         : oldState.businessHours,
-      metadata: updates.metadata ? { ...oldState.metadata, ...updates.metadata } : oldState.metadata
+      metadata: updates.metadata
+        ? { ...oldState.metadata, ...StateManager._deepSanitize(updates.metadata) }
+        : oldState.metadata
     };
 
     // Check if state actually changed
@@ -404,6 +406,51 @@ export class StateManager {
     this.setState(initialState);
     this.history = [initialState];
     this.historyIndex = 0;
+  }
+
+  /**
+   * Recursively sanitize an object to prevent prototype pollution
+   * Removes dangerous keys (__proto__, constructor, prototype) at all levels
+   * @param {*} obj - Object to sanitize
+   * @param {number} depth - Current recursion depth
+   * @returns {*} Sanitized object
+   * @private
+   */
+  static _deepSanitize(obj, depth = 0) {
+    // Prevent recursion attacks
+    if (depth > 10) {
+      return {};
+    }
+
+    if (obj === null || typeof obj !== 'object') {
+      return obj;
+    }
+
+    // Don't sanitize Date objects or arrays of primitives
+    if (obj instanceof Date) {
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => StateManager._deepSanitize(item, depth + 1));
+    }
+
+    const sanitized = {};
+    const dangerousKeys = new Set(['__proto__', 'constructor', 'prototype']);
+
+    for (const key of Object.keys(obj)) {
+      if (dangerousKeys.has(key)) {
+        continue;
+      }
+      const value = obj[key];
+      if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+        sanitized[key] = StateManager._deepSanitize(value, depth + 1);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+
+    return sanitized;
   }
 
   /**
