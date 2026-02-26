@@ -7,6 +7,15 @@
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
 
 export class Event {
+  // Field size limits
+  static FIELD_LIMITS = {
+    id: 256,
+    title: 1000,
+    description: 10000,
+    location: 500
+  };
+  static MAX_METADATA_SIZE = 50 * 1024; // 50KB
+
   /**
    * Normalize event data
    * @param {import('../../types.js').EventData} data - Raw event data
@@ -37,11 +46,15 @@ export class Event {
       }
     }
 
-    // Normalize string fields
-    normalized.id = String(normalized.id || '').trim();
-    normalized.title = String(normalized.title || '').trim();
-    normalized.description = String(normalized.description || '').trim();
-    normalized.location = String(normalized.location || '').trim();
+    // Normalize string fields with size limits
+    normalized.id = String(normalized.id || '').trim().slice(0, Event.FIELD_LIMITS.id);
+    normalized.title = String(normalized.title || '').trim().slice(0, Event.FIELD_LIMITS.title);
+    normalized.description = String(normalized.description || '')
+      .trim()
+      .slice(0, Event.FIELD_LIMITS.description);
+    normalized.location = String(normalized.location || '')
+      .trim()
+      .slice(0, Event.FIELD_LIMITS.location);
 
     // Normalize arrays
     normalized.attendees = Array.isArray(normalized.attendees) ? normalized.attendees : [];
@@ -295,8 +308,8 @@ export class Event {
     // Conference/Virtual meeting
     this.conferenceData = normalized.conferenceData;
 
-    // Custom metadata for extensibility
-    this.metadata = { ...normalized.metadata };
+    // Custom metadata for extensibility (with size/type validation)
+    this.metadata = Event._sanitizeMetadata(normalized.metadata);
 
     // Computed properties cache
     this._cache = {};
@@ -814,6 +827,46 @@ export class Event {
    */
   hasAllCategories(categories) {
     return categories.every(category => this.hasCategory(category));
+  }
+
+  // ============ Metadata Sanitization ============
+
+  /**
+   * Sanitize metadata to enforce size limits and reject unsafe types
+   * @param {Object} metadata - Raw metadata object
+   * @returns {Object} Sanitized metadata
+   * @private
+   */
+  static _sanitizeMetadata(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+      return {};
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(metadata)) {
+      // Reject functions and symbols
+      if (typeof value === 'function' || typeof value === 'symbol') {
+        continue;
+      }
+      sanitized[key] = value;
+    }
+
+    // Enforce serialized size limit
+    let serialized;
+    try {
+      serialized = JSON.stringify(sanitized);
+    } catch {
+      // If metadata can't be serialized (circular refs, etc.), return empty
+      return {};
+    }
+
+    if (serialized.length > Event.MAX_METADATA_SIZE) {
+      throw new Error(
+        `Event metadata exceeds maximum size of ${Event.MAX_METADATA_SIZE / 1024}KB when serialized`
+      );
+    }
+
+    return sanitized;
   }
 
   // ============ Validation Methods ============
