@@ -7,6 +7,9 @@ import { RRuleParser } from './RRuleParser.js';
  * Full support for RFC 5545 (iCalendar) RRULE specification
  */
 export class RecurrenceEngine {
+  // Hard limit to prevent resource exhaustion regardless of caller input
+  static MAX_OCCURRENCES_HARD_LIMIT = 10000;
+
   /**
    * Expand a recurring event into individual occurrences
    * @param {import('./Event.js').Event} event - The recurring event
@@ -17,6 +20,8 @@ export class RecurrenceEngine {
    * @returns {import('../../types.js').EventOccurrence[]} Array of occurrence objects with start/end dates
    */
   static expandEvent(event, rangeStart, rangeEnd, maxOccurrences = 365, timezone = null) {
+    // Enforce hard limit regardless of caller-provided value
+    maxOccurrences = Math.min(maxOccurrences, RecurrenceEngine.MAX_OCCURRENCES_HARD_LIMIT);
     if (!event.recurring || !event.recurrenceRule) {
       return [{ start: event.start, end: event.end, timezone: event.timeZone }];
     }

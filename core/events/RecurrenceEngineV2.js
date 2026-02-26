@@ -7,6 +7,9 @@ import { TimezoneManager } from '../timezone/TimezoneManager.js';
 import { RRuleParser } from './RRuleParser.js';
 
 export class RecurrenceEngineV2 {
+  // Hard limit to prevent resource exhaustion regardless of caller input
+  static MAX_OCCURRENCES_HARD_LIMIT = 10000;
+
   constructor() {
     // Use singleton to share cache across all components
     this.tzManager = TimezoneManager.getInstance();
@@ -32,12 +35,15 @@ export class RecurrenceEngineV2 {
    */
   expandEvent(event, rangeStart, rangeEnd, options = {}) {
     const {
-      maxOccurrences = 365,
+      maxOccurrences: requestedMax = 365,
       includeModified = true,
       includeCancelled = false,
       timezone = event.timeZone || 'UTC',
       handleDST = true
     } = options;
+
+    // Enforce hard limit regardless of caller-provided value
+    const maxOccurrences = Math.min(requestedMax, RecurrenceEngineV2.MAX_OCCURRENCES_HARD_LIMIT);
 
     // Check cache
     const cacheKey = this.getCacheKey(event.id, rangeStart, rangeEnd, options);
