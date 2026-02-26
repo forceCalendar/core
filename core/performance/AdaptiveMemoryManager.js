@@ -119,22 +119,14 @@ export class AdaptiveMemoryManager {
       }
     }
 
-    // Node.js environment - use fully indirect access to avoid LWC static analysis
-    // Salesforce Locker Service blocks any reference to process.memoryUsage
+    // Node.js environment
     try {
-      const g = typeof globalThis !== 'undefined' ? globalThis : {};
-      const procKey = 'proc' + 'ess';
-      const memKey = 'mem' + 'oryUsage';
-      const p = g[procKey];
-      if (p && typeof p === 'object') {
-        const memFn = p[memKey];
-        if (typeof memFn === 'function') {
-          const usage = memFn.call(p);
-          return usage.heapUsed / usage.heapTotal;
-        }
+      if (typeof process !== 'undefined' && typeof process.memoryUsage === 'function') {
+        const usage = process.memoryUsage();
+        return usage.heapUsed / usage.heapTotal;
       }
     } catch (e) {
-      // Ignore - not in Node.js environment
+      // Ignore - not available in this environment (e.g., Salesforce Locker Service)
     }
 
     // Fallback - estimate based on cache sizes
