@@ -179,15 +179,83 @@ export class ICSHandler {
    * @returns {Promise<Object>} Import results
    */
   async importFromURL(url, options = {}) {
+    // Validate URL before fetching to prevent SSRF
+    ICSHandler.validateURL(url);
+
     try {
-      const response = await fetch(url);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+
       if (!response.ok) {
         throw new Error(`Failed to fetch ICS: ${response.statusText}`);
       }
+
+      // Validate Content-Type header
+      const contentType = response.headers.get('content-type') || '';
+      const allowedTypes = ['text/calendar', 'text/plain', 'application/octet-stream'];
+      const typeMatch = allowedTypes.some(t => contentType.toLowerCase().includes(t));
+      if (contentType && !typeMatch) {
+        throw new Error(
+          `Unexpected Content-Type: ${contentType}. Expected text/calendar or text/plain`
+        );
+      }
+
       const icsString = await response.text();
       return this.import(icsString, options);
     } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Failed to import from URL: request timed out after 30 seconds');
+      }
       throw new Error(`Failed to import from URL: ${error.message}`);
+    }
+  }
+
+  /**
+   * Validate a URL for safety (prevent SSRF attacks)
+   * @param {string} url - URL to validate
+   * @throws {Error} If URL is not safe
+   */
+  static validateURL(url) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error('Invalid URL');
+    }
+
+    // Only allow http and https schemes
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`URL scheme "${parsed.protocol}" is not allowed. Only http and https are permitted`);
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Block localhost
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      throw new Error('URLs pointing to localhost are not allowed');
+    }
+
+    // Block private/internal IP ranges
+    const privatePatterns = [
+      /^127\./, // 127.0.0.0/8
+      /^10\./, // 10.0.0.0/8
+      /^192\.168\./, // 192.168.0.0/16
+      /^172\.(1[6-9]|2\d|3[01])\./, // 172.16.0.0/12
+      /^169\.254\./, // 169.254.0.0/16 (link-local)
+      /^0\./, // 0.0.0.0/8
+      /^\[?fe80:/i, // IPv6 link-local
+      /^\[?fc00:/i, // IPv6 unique local
+      /^\[?fd/i, // IPv6 unique local
+      /^\[?::1\]?$/ // IPv6 loopback
+    ];
+
+    for (const pattern of privatePatterns) {
+      if (pattern.test(hostname)) {
+        throw new Error('URLs pointing to private/internal networks are not allowed');
+      }
     }
   }
 
@@ -198,6 +266,9 @@ export class ICSHandler {
    * @returns {Object} Subscription object
    */
   subscribe(url, options = {}) {
+    // Validate URL before subscribing to prevent SSRF
+    ICSHandler.validateURL(url);
+
     const {
       refreshInterval = 3600000, // 1 hour default
       autoRefresh = true,
