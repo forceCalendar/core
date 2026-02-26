@@ -63,7 +63,10 @@ export class RRuleParser {
           break;
 
         case 'BYWEEKNO':
-          rule.byWeekNo = this.parseIntList(value);
+          // RFC 5545: valid range is 1-53 or -53 to -1 (no zero)
+          rule.byWeekNo = this.parseIntList(value).filter(
+            v => v !== 0 && v >= -53 && v <= 53
+          );
           break;
 
         case 'BYMONTH':
@@ -242,6 +245,7 @@ export class RRuleParser {
     rule.byMonth = validateArray(rule.byMonth || [], 1, 12);
     rule.byMonthDay = validateArray(rule.byMonthDay || [], -31, 31).filter(v => v !== 0);
     rule.byYearDay = validateArray(rule.byYearDay || [], -366, 366).filter(v => v !== 0);
+    // RFC 5545: BYWEEKNO valid range is 1-53 or -53 to -1
     rule.byWeekNo = validateArray(rule.byWeekNo || [], -53, 53).filter(v => v !== 0);
     rule.byHour = validateArray(rule.byHour || [], 0, 23);
     rule.byMinute = validateArray(rule.byMinute || [], 0, 59);
