@@ -62,11 +62,16 @@ jobs:
       run: |
         PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
 
-        # Get latest version from NPM (source of truth), fallback to local
+        # Sync to NPM version only if NPM is ahead of local
         NPM_VERSION=$(npm view "$PACKAGE_NAME" version 2>/dev/null || echo "")
+        LOCAL_VERSION=$(node -e "console.log(require('./package.json').version)")
         if [ -n "$NPM_VERSION" ]; then
-          echo "Syncing to NPM version: $NPM_VERSION"
-          npm version "$NPM_VERSION" --no-git-tag-version --allow-same-version
+          if npx semver "$NPM_VERSION" -r ">$LOCAL_VERSION" > /dev/null 2>&1; then
+            echo "NPM version $NPM_VERSION is ahead of local $LOCAL_VERSION, syncing"
+            npm version "$NPM_VERSION" --no-git-tag-version --allow-same-version
+          else
+            echo "Local version $LOCAL_VERSION is ahead of or equal to NPM $NPM_VERSION, keeping local"
+          fi
         fi
 
         # Determine bump type from commit message or manual input
@@ -89,19 +94,9 @@ jobs:
 
         echo "Bump type: $BUMP_TYPE"
 
-        # Bump and verify the version is publishable (retry up to 5 times for yanked versions)
-        for i in 1 2 3 4 5; do
-          NEW_VERSION=$(npm version patch --no-git-tag-version)
-          echo "Trying version: $NEW_VERSION"
-          if npm publish --dry-run 2>&1 | grep -q "E403"; then
-            echo "Version $NEW_VERSION is blocked (previously published/unpublished). Bumping again..."
-          else
-            break
-          fi
-        done
-
+        NEW_VERSION=$(npm version $BUMP_TYPE --no-git-tag-version)
         echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-        echo "Final version: $NEW_VERSION"
+        echo "Calculated new version: $NEW_VERSION"
 
     - name: Check if version already exists
       id: check_version
