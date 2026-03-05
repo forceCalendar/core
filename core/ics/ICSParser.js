@@ -10,7 +10,10 @@ export class ICSParser {
   static MAX_LINES = 100000; // 100k lines
   static MAX_EVENTS = 10000; // 10k events
 
-  constructor() {
+  constructor(options = {}) {
+    // Configurable max file size (defaults to static limit)
+    this.maxFileSize = options.maxFileSize || ICSParser.MAX_INPUT_SIZE;
+
     // ICS line folding max width
     this.maxLineLength = 75;
 
@@ -38,10 +41,13 @@ export class ICSParser {
    * @returns {Array} Array of event objects
    */
   parse(icsString) {
-    // Enforce input size limit
-    if (typeof icsString === 'string' && icsString.length > ICSParser.MAX_INPUT_SIZE) {
+    if (typeof icsString !== 'string') {
+      throw new Error('ICS input must be a string');
+    }
+    // Enforce input size limit (uses instance config, falling back to static default)
+    if (icsString.length > this.maxFileSize) {
       throw new Error(
-        `ICS input exceeds maximum size of ${ICSParser.MAX_INPUT_SIZE / (1024 * 1024)}MB`
+        `ICS input exceeds maximum size of ${this.maxFileSize / (1024 * 1024)}MB`
       );
     }
 
