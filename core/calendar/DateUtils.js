@@ -256,8 +256,11 @@ export class DateUtils {
    * @returns {number}
    */
   static differenceInDays(date1, date2) {
-    const diff = date1.getTime() - date2.getTime();
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
+    // Normalize to midnight to avoid DST-related hour differences
+    const d1 = new Date(date1.getFullYear(), date1.getMonth(), date1.getDate());
+    const d2 = new Date(date2.getFullYear(), date2.getMonth(), date2.getDate());
+    const diff = d1.getTime() - d2.getTime();
+    return Math.round(diff / (1000 * 60 * 60 * 24));
   }
 
   /**
