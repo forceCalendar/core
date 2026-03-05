@@ -639,6 +639,8 @@ export class EventStore {
     this.indices.byDate.clear();
     this.indices.byMonth.clear();
     this.indices.recurring.clear();
+    this.indices.byCategory.clear();
+    this.indices.byStatus.clear();
 
     this._notifyChange({
       type: 'clear',
