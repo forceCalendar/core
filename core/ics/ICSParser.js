@@ -284,6 +284,13 @@ export class ICSParser {
         event.recurrenceRule = value;
         event.recurring = true;
         break;
+
+      case 'EXDATE': {
+        if (!event.excludeDates) event.excludeDates = [];
+        const dates = value.split(',').map(d => this.parseDate(d.trim(), property));
+        event.excludeDates.push(...dates.filter(d => d !== null));
+        break;
+      }
     }
   }
 
