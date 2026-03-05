@@ -228,7 +228,9 @@ export class ICSHandler {
 
     // Only allow http and https schemes
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`URL scheme "${parsed.protocol}" is not allowed. Only http and https are permitted`);
+      throw new Error(
+        `URL scheme "${parsed.protocol}" is not allowed. Only http and https are permitted`
+      );
     }
 
     const hostname = parsed.hostname.toLowerCase();

@@ -46,9 +46,7 @@ export class ICSParser {
     }
     // Enforce input size limit (uses instance config, falling back to static default)
     if (icsString.length > this.maxFileSize) {
-      throw new Error(
-        `ICS input exceeds maximum size of ${this.maxFileSize / (1024 * 1024)}MB`
-      );
+      throw new Error(`ICS input exceeds maximum size of ${this.maxFileSize / (1024 * 1024)}MB`);
     }
 
     const events = [];

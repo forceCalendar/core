@@ -64,9 +64,7 @@ export class RRuleParser {
 
         case 'BYWEEKNO':
           // RFC 5545: valid range is 1-53 or -53 to -1 (no zero)
-          rule.byWeekNo = this.parseIntList(value).filter(
-            v => v !== 0 && v >= -53 && v <= 53
-          );
+          rule.byWeekNo = this.parseIntList(value).filter(v => v !== 0 && v >= -53 && v <= 53);
           break;
 
         case 'BYMONTH':
