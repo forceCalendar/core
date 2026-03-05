@@ -47,8 +47,12 @@ export class Event {
     }
 
     // Normalize string fields with size limits
-    normalized.id = String(normalized.id || '').trim().slice(0, Event.FIELD_LIMITS.id);
-    normalized.title = String(normalized.title || '').trim().slice(0, Event.FIELD_LIMITS.title);
+    normalized.id = String(normalized.id || '')
+      .trim()
+      .slice(0, Event.FIELD_LIMITS.id);
+    normalized.title = String(normalized.title || '')
+      .trim()
+      .slice(0, Event.FIELD_LIMITS.title);
     normalized.description = String(normalized.description || '')
       .trim()
       .slice(0, Event.FIELD_LIMITS.description);

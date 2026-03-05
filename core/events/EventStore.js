@@ -241,8 +241,14 @@ export class EventStore {
       for (let offset = -1; offset <= 1; offset++) {
         let m = filters.month + offset;
         let y = filters.year;
-        if (m < 1) { m = 12; y--; }
-        if (m > 12) { m = 1; y++; }
+        if (m < 1) {
+          m = 12;
+          y--;
+        }
+        if (m > 12) {
+          m = 1;
+          y++;
+        }
         const key = `${y}-${String(m).padStart(2, '0')}`;
         const ids = this.indices.byMonth.get(key);
         if (ids) {
