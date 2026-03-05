@@ -89,9 +89,19 @@ jobs:
 
         echo "Bump type: $BUMP_TYPE"
 
-        NEW_VERSION=$(npm version $BUMP_TYPE --no-git-tag-version)
+        # Bump and verify the version is publishable (retry up to 5 times for yanked versions)
+        for i in 1 2 3 4 5; do
+          NEW_VERSION=$(npm version patch --no-git-tag-version)
+          echo "Trying version: $NEW_VERSION"
+          if npm publish --dry-run 2>&1 | grep -q "E403"; then
+            echo "Version $NEW_VERSION is blocked (previously published/unpublished). Bumping again..."
+          else
+            break
+          fi
+        done
+
         echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-        echo "Calculated new version: $NEW_VERSION"
+        echo "Final version: $NEW_VERSION"
 
     - name: Check if version already exists
       id: check_version
