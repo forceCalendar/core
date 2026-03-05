@@ -234,9 +234,30 @@ export class EventStore {
 
     // Filter by month
     if (filters.month && filters.year) {
-      const monthKey = `${filters.year}-${String(filters.month).padStart(2, '0')}`;
-      const eventIds = this.indices.byMonth.get(monthKey) || new Set();
-      results = results.filter(event => eventIds.has(event.id));
+      // Collect candidates from target month AND adjacent months to handle
+      // timezone boundary issues (events indexed in the event's own timezone
+      // may fall in a different month than the query month)
+      const candidateIds = new Set();
+      for (let offset = -1; offset <= 1; offset++) {
+        let m = filters.month + offset;
+        let y = filters.year;
+        if (m < 1) { m = 12; y--; }
+        if (m > 12) { m = 1; y++; }
+        const key = `${y}-${String(m).padStart(2, '0')}`;
+        const ids = this.indices.byMonth.get(key);
+        if (ids) {
+          ids.forEach(id => candidateIds.add(id));
+        }
+      }
+
+      // Post-filter: only include events that actually overlap with the requested month
+      const monthStart = new Date(filters.year, filters.month - 1, 1);
+      const monthEnd = new Date(filters.year, filters.month, 0, 23, 59, 59, 999);
+
+      results = results.filter(event => {
+        if (!candidateIds.has(event.id)) return false;
+        return event.start <= monthEnd && event.end >= monthStart;
+      });
     }
 
     // Filter by all-day events
