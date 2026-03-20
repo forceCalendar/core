@@ -358,11 +358,18 @@ export class EventSearch {
         if (normalizedValue.includes(term)) {
           totalScore += 10;
         }
-        // Fuzzy match if enabled
+        // Fuzzy match if enabled — compare against individual words
         else if (fuzzy) {
-          const distance = this.levenshteinDistance(term, normalizedValue);
-          if (distance <= 2) {
-            totalScore += 5 - distance;
+          const words = normalizedValue.split(/\s+/);
+          let bestDistance = Infinity;
+          for (const word of words) {
+            const distance = this.levenshteinDistance(term, word);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+            }
+          }
+          if (bestDistance <= 2) {
+            totalScore += 5 - bestDistance;
           }
         }
       }
