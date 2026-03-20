@@ -497,7 +497,7 @@ export class DateUtils {
     const julOffset = DateUtils.getTimezoneOffset(jul, timeZone);
     const currentOffset = DateUtils.getTimezoneOffset(date, timeZone);
 
-    return Math.max(janOffset, julOffset) === currentOffset;
+    return Math.min(janOffset, julOffset) === currentOffset;
   }
 
   /**
