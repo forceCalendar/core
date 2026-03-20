@@ -148,8 +148,8 @@ export class Event {
         if (!attendee.email || !attendee.name) {
           throw new Error(`Attendee at index ${index} must have email and name`);
         }
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        // Validate email format (linear-time regex, no backtracking)
+        const emailRegex = /^[^\s@]+@[^\s@.]+\.[^\s@]+$/;
         if (!emailRegex.test(attendee.email)) {
           throw new Error(`Invalid email for attendee: ${attendee.email}`);
         }
@@ -919,7 +919,7 @@ export class Event {
    * @returns {boolean} True if email is valid
    */
   _isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@.]+\.[^\s@]+$/;
     return emailRegex.test(email);
   }
 
