@@ -473,14 +473,32 @@ export class Event {
    * @throws {Error} If otherEvent is not an Event instance or doesn't have start/end
    */
   overlaps(otherEvent) {
-    if (otherEvent instanceof Event) {
-      // Events don't overlap if one ends before the other starts
-      return !(this.end <= otherEvent.start || this.start >= otherEvent.end);
-    } else if (otherEvent && otherEvent.start && otherEvent.end) {
-      // Allow checking against time ranges
-      return !(this.end <= otherEvent.start || this.start >= otherEvent.end);
+    if (!otherEvent || (!otherEvent.start && !(otherEvent instanceof Event))) {
+      throw new Error('Parameter must be an Event instance or have start/end properties');
     }
-    throw new Error('Parameter must be an Event instance or have start/end properties');
+
+    let thisStart = this.start;
+    let thisEnd = this.end;
+    let otherStart = otherEvent.start;
+    let otherEnd = otherEvent.end;
+
+    // Normalize all-day event boundaries for consistent comparison.
+    // All-day events use end=23:59:59.999, but a timed event ending at
+    // exactly midnight (00:00:00) of the next day should overlap with
+    // an all-day event on the previous day.
+    if (this.allDay) {
+      thisEnd = new Date(thisEnd);
+      thisEnd.setDate(thisEnd.getDate() + 1);
+      thisEnd.setHours(0, 0, 0, 0);
+    }
+    if (otherEvent.allDay) {
+      otherEnd = new Date(otherEnd);
+      otherEnd.setDate(otherEnd.getDate() + 1);
+      otherEnd.setHours(0, 0, 0, 0);
+    }
+
+    // Standard interval overlap: NOT (one ends before or when the other starts)
+    return !(thisEnd <= otherStart || thisStart >= otherEnd);
   }
 
   /**
