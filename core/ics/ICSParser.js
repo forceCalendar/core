@@ -331,19 +331,19 @@ export class ICSParser {
     // Check if it's a date-only value
     if (property.includes('VALUE=DATE') || dateString.length === 8) {
       // YYYYMMDD format
-      const year = dateString.substr(0, 4);
-      const month = dateString.substr(4, 2);
-      const day = dateString.substr(6, 2);
+      const year = dateString.substring(0, 4);
+      const month = dateString.substring(4, 6);
+      const day = dateString.substring(6, 8);
       return new Date(year, month - 1, day);
     }
 
     // Full datetime: YYYYMMDDTHHMMSS[Z]
-    const year = parseInt(dateString.substr(0, 4));
-    const month = parseInt(dateString.substr(4, 2)) - 1;
-    const day = parseInt(dateString.substr(6, 2));
-    const hour = parseInt(dateString.substr(9, 2)) || 0;
-    const minute = parseInt(dateString.substr(11, 2)) || 0;
-    const second = parseInt(dateString.substr(13, 2)) || 0;
+    const year = parseInt(dateString.substring(0, 4));
+    const month = parseInt(dateString.substring(4, 6)) - 1;
+    const day = parseInt(dateString.substring(6, 8));
+    const hour = parseInt(dateString.substring(9, 11)) || 0;
+    const minute = parseInt(dateString.substring(11, 13)) || 0;
+    const second = parseInt(dateString.substring(13, 15)) || 0;
 
     if (dateString.endsWith('Z')) {
       // UTC time
@@ -396,14 +396,14 @@ export class ICSParser {
         let remaining = line;
 
         // First line
-        folded.push(remaining.substr(0, this.maxLineLength));
-        remaining = remaining.substr(this.maxLineLength);
+        folded.push(remaining.substring(0, this.maxLineLength));
+        remaining = remaining.substring(this.maxLineLength);
 
         // Continuation lines (with space prefix)
         while (remaining.length > 0) {
-          const chunk = remaining.substr(0, this.maxLineLength - 1);
+          const chunk = remaining.substring(0, this.maxLineLength - 1);
           folded.push(` ${chunk}`);
-          remaining = remaining.substr(chunk.length);
+          remaining = remaining.substring(chunk.length);
         }
 
         return folded.join('\r\n');
@@ -443,7 +443,7 @@ export class ICSParser {
    */
   generateUID() {
     const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substr(2, 9);
+    const random = Math.random().toString(36).substring(2, 11);
     return `${timestamp}-${random}@lightning-calendar`;
   }
 
