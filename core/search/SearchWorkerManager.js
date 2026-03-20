@@ -281,6 +281,8 @@ export class SearchWorkerManager {
 
       this.pendingSearches.push({
         id: searchId,
+        query,
+        options,
         resolve
       });
 
@@ -349,7 +351,14 @@ export class SearchWorkerManager {
   processPendingSearches() {
     // Re-trigger pending searches after indexing
     for (const search of this.pendingSearches) {
-      // Will be handled by worker
+      this.worker.postMessage({
+        type: 'search',
+        data: {
+          id: search.id,
+          query: search.query,
+          options: search.options
+        }
+      });
     }
   }
 
