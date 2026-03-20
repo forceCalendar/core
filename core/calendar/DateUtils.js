@@ -509,18 +509,11 @@ export class DateUtils {
    */
   static addHoursWithDST(date, hours, timeZone) {
     const result = new Date(date);
-    const originalOffset = DateUtils.getTimezoneOffset(date, timeZone);
 
-    // Add hours
+    // UTC millisecond arithmetic is inherently DST-agnostic.
+    // Adding hours in UTC millis always produces the correct absolute time
+    // regardless of DST transitions — no additional adjustment needed.
     result.setTime(result.getTime() + hours * 60 * 60 * 1000);
-
-    // Check if DST transition occurred
-    const newOffset = DateUtils.getTimezoneOffset(result, timeZone);
-    if (originalOffset !== newOffset) {
-      // Adjust for DST change
-      const dstAdjustment = (newOffset - originalOffset) * 60000;
-      result.setTime(result.getTime() + dstAdjustment);
-    }
 
     return result;
   }
