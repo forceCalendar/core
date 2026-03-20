@@ -366,10 +366,10 @@ export class TimezoneManager {
     // Check abbreviations
     const upperTz = tzString.toUpperCase();
     if (
-      this.database.abbreviations &&
-      Object.prototype.hasOwnProperty.call(this.database.abbreviations, upperTz)
+      this.database.aliases &&
+      Object.prototype.hasOwnProperty.call(this.database.aliases, upperTz)
     ) {
-      return this.database.abbreviations[upperTz];
+      return this.database.aliases[upperTz];
     }
 
     // Try to parse offset format (e.g., "+05:30", "-08:00")
