@@ -605,6 +605,11 @@ export class Event {
       throw new Error('Attendee must have an email');
     }
 
+    // Validate email format (matches constructor validation)
+    if (!this._isValidEmail(attendee.email)) {
+      throw new Error(`Invalid email for attendee: ${attendee.email}`);
+    }
+
     // Check if attendee already exists
     if (this.hasAttendee(attendee.email)) {
       return false;
