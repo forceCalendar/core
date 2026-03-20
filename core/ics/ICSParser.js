@@ -232,7 +232,7 @@ export class ICSParser {
       for (const reminder of event.reminders) {
         lines.push('BEGIN:VALARM');
         lines.push('ACTION:DISPLAY');
-        lines.push(`TRIGGER:-PT${reminder.minutes || 15}M`);
+        lines.push(`TRIGGER:-PT${reminder.minutesBefore || 15}M`);
         lines.push(`DESCRIPTION:${event.title || 'Reminder'}`);
         lines.push('END:VALARM');
       }
