@@ -57,7 +57,7 @@ export class EnhancedCalendar extends Calendar {
   /**
    * Get events with enhanced recurrence expansion
    */
-  async getEventsInRange(startDate, endDate, options = {}) {
+  getEventsInRange(startDate, endDate, options = {}) {
     const startTime = performance.now();
 
     const regularEvents = [];
