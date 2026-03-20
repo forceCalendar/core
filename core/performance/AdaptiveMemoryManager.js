@@ -69,11 +69,15 @@ export class AdaptiveMemoryManager {
     }
 
     this.monitoringInterval = setInterval(() => {
-      this.checkMemoryPressure();
+      this.checkMemoryPressure().catch(err => {
+        console.error('Memory pressure check failed:', err);
+      });
     }, this.config.checkInterval);
 
     // Initial check
-    this.checkMemoryPressure();
+    this.checkMemoryPressure().catch(err => {
+      console.error('Initial memory pressure check failed:', err);
+    });
   }
 
   /**
