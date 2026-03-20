@@ -5,6 +5,7 @@
 
 import { ICSParser } from './ICSParser.js';
 import { Event } from '../events/Event.js';
+import { RecurrenceEngineV2 } from '../events/RecurrenceEngineV2.js';
 
 export class ICSHandler {
   constructor(calendar) {
@@ -380,6 +381,7 @@ export class ICSHandler {
     const expanded = [];
     const rangeStart = dateRange?.start || new Date();
     const rangeEnd = dateRange?.end || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    const recurrenceEngine = new RecurrenceEngineV2();
 
     for (const event of events) {
       if (!(event.recurring || event.recurrenceRule || event.recurrence)) {
@@ -387,26 +389,20 @@ export class ICSHandler {
         continue;
       }
 
-      // TODO: Get instances from calendar's recurrence engine when implemented
-      // For now, just include the base event
-      const instances = [
-        {
-          start: event.start,
-          end: event.end
-        }
-      ];
+      // Use RecurrenceEngineV2 to expand occurrences within the date range
+      const occurrences = recurrenceEngine.expandEvent(event, rangeStart, rangeEnd);
 
-      // Add each instance as a separate event
-      for (const instance of instances) {
+      // Add each occurrence as a separate event
+      for (const occurrence of occurrences) {
         expanded.push({
           ...event,
-          id: `${event.id}-${instance.start.getTime()}`,
-          start: instance.start,
-          end: instance.end,
+          id: `${event.id}-${occurrence.start.getTime()}`,
+          start: occurrence.start,
+          end: occurrence.end,
           recurring: false,
           recurrenceRule: null,
-          recurrence: null, // Remove recurrence from instances
-          parentId: event.id // Reference to original
+          recurrence: null,
+          parentId: event.id
         });
       }
     }
