@@ -179,6 +179,14 @@ export class TimezoneManager {
    * @returns {boolean} True if in DST
    */
   isDST(date, timezone, dstRule = null) {
+    // Check cache first
+    const cacheKey = `${timezone}_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}_${date.getHours()}`;
+    if (this.dstCache.has(cacheKey)) {
+      this.cacheHits++;
+      return this.dstCache.get(cacheKey);
+    }
+    this.cacheMisses++;
+
     // Get DST rule if not provided
     if (!dstRule) {
       const tzData = this.database.getTimezone(timezone);
@@ -201,11 +209,18 @@ export class TimezoneManager {
     );
 
     // Handle Southern Hemisphere (DST crosses year boundary)
+    let result;
     if (dstStart > dstEnd) {
-      return date >= dstStart || date < dstEnd;
+      result = date >= dstStart || date < dstEnd;
+    } else {
+      result = date >= dstStart && date < dstEnd;
     }
 
-    return date >= dstStart && date < dstEnd;
+    // Cache the result
+    this.dstCache.set(cacheKey, result);
+    this._manageCacheSize();
+
+    return result;
   }
 
   /**
