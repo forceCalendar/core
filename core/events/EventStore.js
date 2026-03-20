@@ -662,9 +662,11 @@ export class EventStore {
   loadEvents(events) {
     this.clear();
 
+    this.startBatch();
     for (const eventData of events) {
       this.addEvent(eventData);
     }
+    this.commitBatch();
   }
 
   /**
