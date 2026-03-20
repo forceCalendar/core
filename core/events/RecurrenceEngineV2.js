@@ -304,10 +304,20 @@ export class RecurrenceEngineV2 {
     } else if (rule.byDay && rule.byDay.length > 0) {
       // Nth weekday of month (e.g., "2nd Tuesday")
       const byDay = rule.byDay[0];
-      const nthOccurrence = byDay.nth || 1;
+      let weekday, nthOccurrence;
+
+      if (typeof byDay === 'string') {
+        // Parse string format from RRuleParser: "MO", "2TU", "-1FR"
+        const match = byDay.match(/^(-?\d*)([A-Z]{2})$/);
+        weekday = match ? match[2] : byDay;
+        nthOccurrence = match && match[1] ? parseInt(match[1], 10) : 1;
+      } else {
+        weekday = byDay.weekday;
+        nthOccurrence = byDay.nth || 1;
+      }
 
       next.setMonth(next.getMonth() + rule.interval);
-      this.setToNthWeekdayOfMonth(next, byDay.weekday, nthOccurrence);
+      this.setToNthWeekdayOfMonth(next, weekday, nthOccurrence);
     } else if (rule.bySetPos && rule.bySetPos.length > 0) {
       // BYSETPOS for selecting from set
       next.setMonth(next.getMonth() + rule.interval);
