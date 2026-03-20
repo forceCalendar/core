@@ -320,16 +320,11 @@ export class ConflictDetector {
       return conflicts;
     }
 
-    const conflictingAttendees = [];
-
-    for (const attendee1 of event1.attendees) {
-      for (const attendee2 of event2.attendees) {
-        if (attendee1.email === attendee2.email) {
-          // Same attendee in both events
-          conflictingAttendees.push(attendee1.email);
-        }
-      }
-    }
+    // Use Set for O(1) lookup instead of O(n*m) nested loops
+    const emails1 = new Set(event1.attendees.map(a => a.email));
+    const conflictingAttendees = event2.attendees
+      .filter(a => emails1.has(a.email))
+      .map(a => a.email);
 
     if (conflictingAttendees.length > 0) {
       // Determine severity based on attendee responses
