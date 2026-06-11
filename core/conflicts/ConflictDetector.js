@@ -500,13 +500,36 @@ export class ConflictDetector {
    * @private
    */
   _isWithinBusinessHours(start, end, options) {
-    // Simple implementation - can be enhanced
-    const startHour = start.getHours();
-    const endHour = end.getHours();
+    if (options.excludeWeekends) {
+      const day = start.getDay();
+      if (day === 0 || day === 6) {
+        return false;
+      }
+    }
 
-    const businessStart = parseInt(options.businessHours.start.split(':')[0]);
-    const businessEnd = parseInt(options.businessHours.end.split(':')[0]);
+    // Business hours describe a window within a single day, so a period
+    // spanning multiple calendar days can never fit inside them
+    if (
+      start.getFullYear() !== end.getFullYear() ||
+      start.getMonth() !== end.getMonth() ||
+      start.getDate() !== end.getDate()
+    ) {
+      return false;
+    }
 
-    return startHour >= businessStart && endHour <= businessEnd;
+    const [businessStartHour, businessStartMinute = 0] = options.businessHours.start
+      .split(':')
+      .map(Number);
+    const [businessEndHour, businessEndMinute = 0] = options.businessHours.end
+      .split(':')
+      .map(Number);
+
+    const businessStart = businessStartHour * 60 + businessStartMinute;
+    const businessEnd = businessEndHour * 60 + businessEndMinute;
+
+    const startMinutes = start.getHours() * 60 + start.getMinutes();
+    const endMinutes = end.getHours() * 60 + end.getMinutes();
+
+    return startMinutes >= businessStart && endMinutes <= businessEnd;
   }
 }
