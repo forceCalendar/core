@@ -67,17 +67,15 @@ export class ICSParser {
 
       // Parse property and value
       const colonIndex = line.indexOf(':');
-      const semicolonIndex = line.indexOf(';');
-      const separatorIndex =
-        semicolonIndex > -1 && semicolonIndex < colonIndex ? semicolonIndex : colonIndex;
 
-      if (separatorIndex === -1) continue;
+      if (colonIndex === -1) continue;
 
-      const property = line.substring(0, separatorIndex);
+      const property = line.substring(0, colonIndex);
+      const propertyName = this.parsePropertyParts(property).name;
       const value = line.substring(colonIndex + 1);
 
       // Handle component boundaries
-      if (property === 'BEGIN') {
+      if (propertyName === 'BEGIN') {
         if (value === 'VEVENT') {
           // Enforce event count limit
           if (events.length >= ICSParser.MAX_EVENTS) {
@@ -88,7 +86,7 @@ export class ICSParser {
         } else if (value === 'VALARM') {
           inAlarm = true;
         }
-      } else if (property === 'END') {
+      } else if (propertyName === 'END') {
         if (value === 'VEVENT' && currentEvent) {
           events.push(this.normalizeEvent(currentEvent));
           currentEvent = null;
@@ -154,10 +152,17 @@ export class ICSParser {
         lines.push(`DTEND;VALUE=DATE:${this.formatDate(event.end, true)}`);
       }
     } else {
-      const tzid = event.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      lines.push(`DTSTART;TZID=${tzid}:${this.formatDate(event.start)}`);
+      const startTimeZone =
+        event.timeZone || event.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const endTimeZone = event.endTimeZone || startTimeZone;
+
+      lines.push(
+        `DTSTART;TZID=${this.escapeParamValue(startTimeZone)}:${this.formatDate(event.start)}`
+      );
       if (event.end) {
-        lines.push(`DTEND;TZID=${tzid}:${this.formatDate(event.end)}`);
+        lines.push(
+          `DTEND;TZID=${this.escapeParamValue(endTimeZone)}:${this.formatDate(event.end)}`
+        );
       }
     }
 
@@ -247,8 +252,8 @@ export class ICSParser {
    * @private
    */
   parseProperty(property, value, event) {
-    // Extract actual property name (before parameters)
-    const propName = property.split(';')[0];
+    // Extract actual property name and parameters
+    const { name: propName, params } = this.parsePropertyParts(property);
 
     // Map to event property
     const eventProp = this.propertyMap[propName];
@@ -256,12 +261,29 @@ export class ICSParser {
 
     switch (propName) {
       case 'DTSTART':
-      case 'DTEND':
-        event[eventProp] = this.parseDate(value, property);
-        if (property.includes('VALUE=DATE')) {
+      case 'DTEND': {
+        const parsed = this.parseDate(value, property);
+        event[eventProp] = parsed.date;
+
+        if (parsed.timeZone) {
+          if (propName === 'DTSTART') {
+            event.timeZone = parsed.timeZone;
+          } else {
+            event.endTimeZone = parsed.timeZone;
+          }
+        } else if (params.TZID) {
+          if (propName === 'DTSTART') {
+            event.timeZone = params.TZID;
+          } else {
+            event.endTimeZone = params.TZID;
+          }
+        }
+
+        if (params.VALUE === 'DATE') {
           event.allDay = true;
         }
         break;
+      }
 
       case 'SUMMARY':
       case 'DESCRIPTION':
@@ -313,7 +335,7 @@ export class ICSParser {
 
       case 'EXDATE': {
         if (!event.excludeDates) event.excludeDates = [];
-        const dates = value.split(',').map(d => this.parseDate(d.trim(), property));
+        const dates = value.split(',').map(d => this.parseDate(d.trim(), property).date);
         event.excludeDates.push(...dates.filter(d => d !== null));
         break;
       }
@@ -325,16 +347,18 @@ export class ICSParser {
    * @private
    */
   parseDate(dateString, property = '') {
-    // Remove timezone if present
-    dateString = dateString.replace(/^TZID=[^:]+:/, '');
+    const { params } = this.parsePropertyParts(property);
 
     // Check if it's a date-only value
-    if (property.includes('VALUE=DATE') || dateString.length === 8) {
+    if (params.VALUE === 'DATE' || dateString.length === 8) {
       // YYYYMMDD format
       const year = dateString.substring(0, 4);
       const month = dateString.substring(4, 6);
       const day = dateString.substring(6, 8);
-      return new Date(year, month - 1, day);
+      return {
+        date: new Date(year, month - 1, day),
+        timeZone: null
+      };
     }
 
     // Full datetime: YYYYMMDDTHHMMSS[Z]
@@ -347,10 +371,47 @@ export class ICSParser {
 
     if (dateString.endsWith('Z')) {
       // UTC time
-      return new Date(Date.UTC(year, month, day, hour, minute, second));
+      return {
+        date: new Date(Date.UTC(year, month, day, hour, minute, second)),
+        timeZone: 'UTC'
+      };
     }
-    // Local time
-    return new Date(year, month, day, hour, minute, second);
+
+    // Floating or TZID-bound wall time. The timezone itself is preserved on the
+    // event so Event can convert the wall-clock value to UTC consistently.
+    return {
+      date: new Date(year, month, day, hour, minute, second),
+      timeZone: params.TZID || null
+    };
+  }
+
+  /**
+   * Parse property name and parameters from a line prefix.
+   * @private
+   */
+  parsePropertyParts(property = '') {
+    const parts = property.split(';');
+    const name = (parts.shift() || '').toUpperCase();
+    const params = {};
+
+    for (const part of parts) {
+      const equalsIndex = part.indexOf('=');
+      if (equalsIndex === -1) continue;
+
+      const key = part.substring(0, equalsIndex).toUpperCase();
+      const rawValue = part.substring(equalsIndex + 1);
+      params[key] = rawValue.replace(/^"|"$/g, '');
+    }
+
+    return { name, params };
+  }
+
+  /**
+   * Escape an ICS parameter value.
+   * @private
+   */
+  escapeParamValue(value) {
+    return String(value).replace(/"/g, '');
   }
 
   /**

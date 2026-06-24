@@ -4,7 +4,6 @@
  */
 
 import { ICSParser } from './ICSParser.js';
-import { Event } from '../events/Event.js';
 import { RecurrenceEngineV2 } from '../events/RecurrenceEngineV2.js';
 
 export class ICSHandler {
@@ -180,38 +179,125 @@ export class ICSHandler {
    * @returns {Promise<Object>} Import results
    */
   async importFromURL(url, options = {}) {
-    // Validate URL before fetching to prevent SSRF
-    ICSHandler.validateURL(url);
+    const {
+      requestTimeout = 30000,
+      maxRedirects = 5,
+      maxFileSize = this.parser.maxFileSize || ICSParser.MAX_INPUT_SIZE
+    } = options;
 
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      const timeout = setTimeout(() => controller.abort(), requestTimeout);
 
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
+      try {
+        const response = await this.fetchSafeURL(url, {
+          signal: controller.signal,
+          maxRedirects
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ICS: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ICS: ${response.statusText}`);
+        }
+
+        // Validate Content-Type header
+        const contentType = response.headers.get('content-type') || '';
+        const allowedTypes = ['text/calendar', 'text/plain', 'application/octet-stream'];
+        const typeMatch = allowedTypes.some(t => contentType.toLowerCase().includes(t));
+        if (contentType && !typeMatch) {
+          throw new Error(
+            `Unexpected Content-Type: ${contentType}. Expected text/calendar or text/plain`
+          );
+        }
+
+        const contentLength = response.headers.get('content-length');
+        if (contentLength && Number(contentLength) > maxFileSize) {
+          throw new Error(`ICS response exceeds maximum size of ${maxFileSize / (1024 * 1024)}MB`);
+        }
+
+        const icsString = await this.readResponseText(response, maxFileSize);
+        return this.import(icsString, options);
+      } finally {
+        clearTimeout(timeout);
       }
-
-      // Validate Content-Type header
-      const contentType = response.headers.get('content-type') || '';
-      const allowedTypes = ['text/calendar', 'text/plain', 'application/octet-stream'];
-      const typeMatch = allowedTypes.some(t => contentType.toLowerCase().includes(t));
-      if (contentType && !typeMatch) {
-        throw new Error(
-          `Unexpected Content-Type: ${contentType}. Expected text/calendar or text/plain`
-        );
-      }
-
-      const icsString = await response.text();
-      return this.import(icsString, options);
     } catch (error) {
       if (error.name === 'AbortError') {
-        throw new Error('Failed to import from URL: request timed out after 30 seconds');
+        throw new Error(`Failed to import from URL: request timed out after ${requestTimeout}ms`);
       }
       throw new Error(`Failed to import from URL: ${error.message}`);
     }
+  }
+
+  /**
+   * Fetch a URL after validating the initial URL and each redirect target.
+   * @private
+   */
+  async fetchSafeURL(url, { signal, maxRedirects }) {
+    if (typeof fetch !== 'function') {
+      throw new Error('fetch API is not available in this environment');
+    }
+
+    let currentURL = url;
+    const manualRedirects = ICSHandler.isNodeRuntime();
+
+    for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+      await ICSHandler.validateURLForFetch(currentURL);
+
+      const response = await fetch(currentURL, {
+        signal,
+        redirect: manualRedirects ? 'manual' : 'follow'
+      });
+
+      if (
+        !manualRedirects ||
+        response.status < 300 ||
+        response.status >= 400 ||
+        !response.headers.get('location')
+      ) {
+        return response;
+      }
+
+      currentURL = new URL(response.headers.get('location'), currentURL).toString();
+    }
+
+    throw new Error(`Too many redirects while fetching ICS feed (limit ${maxRedirects})`);
+  }
+
+  /**
+   * Read a response body while enforcing a byte limit.
+   * @private
+   */
+  async readResponseText(response, maxFileSize) {
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      const text = await response.text();
+      if (text.length > maxFileSize) {
+        throw new Error(`ICS response exceeds maximum size of ${maxFileSize / (1024 * 1024)}MB`);
+      }
+      return text;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let received = 0;
+    let text = '';
+    let done = false;
+
+    while (!done) {
+      const chunk = await reader.read();
+      done = chunk.done;
+      if (done) break;
+
+      const { value } = chunk;
+      received += value.byteLength;
+      if (received > maxFileSize) {
+        await reader.cancel();
+        throw new Error(`ICS response exceeds maximum size of ${maxFileSize / (1024 * 1024)}MB`);
+      }
+
+      text += decoder.decode(value, { stream: true });
+    }
+
+    text += decoder.decode();
+    return text;
   }
 
   /**
@@ -234,32 +320,123 @@ export class ICSHandler {
       );
     }
 
-    const hostname = parsed.hostname.toLowerCase();
-
-    // Block localhost
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-      throw new Error('URLs pointing to localhost are not allowed');
+    if (parsed.username || parsed.password) {
+      throw new Error('URLs with embedded credentials are not allowed');
     }
 
-    // Block private/internal IP ranges
-    const privatePatterns = [
-      /^127\./, // 127.0.0.0/8
-      /^10\./, // 10.0.0.0/8
-      /^192\.168\./, // 192.168.0.0/16
-      /^172\.(1[6-9]|2\d|3[01])\./, // 172.16.0.0/12
-      /^169\.254\./, // 169.254.0.0/16 (link-local)
-      /^0\./, // 0.0.0.0/8
-      /^\[?fe80:/i, // IPv6 link-local
-      /^\[?fc00:/i, // IPv6 unique local
-      /^\[?fd/i, // IPv6 unique local
-      /^\[?::1\]?$/ // IPv6 loopback
-    ];
+    const hostname = ICSHandler.normalizeHostname(parsed.hostname);
+    if (ICSHandler.isBlockedHostname(hostname) || ICSHandler.isPrivateIPAddress(hostname)) {
+      throw new Error('URLs pointing to private/internal networks are not allowed');
+    }
 
-    for (const pattern of privatePatterns) {
-      if (pattern.test(hostname)) {
-        throw new Error('URLs pointing to private/internal networks are not allowed');
+    return parsed;
+  }
+
+  /**
+   * Validate a URL and, in Node runtimes, ensure DNS does not resolve privately.
+   * @param {string} url - URL to validate
+   * @returns {Promise<URL>} Parsed safe URL
+   */
+  static async validateURLForFetch(url) {
+    const parsed = ICSHandler.validateURL(url);
+
+    if (ICSHandler.isNodeRuntime() && !ICSHandler.isIPAddress(parsed.hostname)) {
+      const dns = await import('node:dns/promises');
+      const addresses = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
+
+      for (const address of addresses) {
+        if (ICSHandler.isPrivateIPAddress(address.address)) {
+          throw new Error('URL hostname resolves to a private/internal network address');
+        }
       }
     }
+
+    return parsed;
+  }
+
+  /**
+   * @private
+   */
+  static isNodeRuntime() {
+    return typeof process !== 'undefined' && !!process.versions?.node;
+  }
+
+  /**
+   * @private
+   */
+  static normalizeHostname(hostname) {
+    return String(hostname)
+      .trim()
+      .toLowerCase()
+      .replace(/^\[/, '')
+      .replace(/\]$/, '')
+      .replace(/\.$/, '');
+  }
+
+  /**
+   * @private
+   */
+  static isBlockedHostname(hostname) {
+    return (
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname === 'metadata.google.internal'
+    );
+  }
+
+  /**
+   * @private
+   */
+  static isIPAddress(hostname) {
+    const normalized = ICSHandler.normalizeHostname(hostname);
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(normalized) || normalized.includes(':');
+  }
+
+  /**
+   * @private
+   */
+  static isPrivateIPAddress(address) {
+    const normalized = ICSHandler.normalizeHostname(address);
+    const ipv4Match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+
+    if (ipv4Match) {
+      const octets = ipv4Match.slice(1).map(Number);
+      if (octets.some(octet => octet < 0 || octet > 255)) return true;
+
+      const [first, second] = octets;
+      return (
+        first === 0 ||
+        first === 10 ||
+        first === 127 ||
+        first >= 224 ||
+        (first === 100 && second >= 64 && second <= 127) ||
+        (first === 169 && second === 254) ||
+        (first === 172 && second >= 16 && second <= 31) ||
+        (first === 192 && second === 168) ||
+        (first === 198 && (second === 18 || second === 19))
+      );
+    }
+
+    const mappedIPv4 = normalized.match(/::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+    if (mappedIPv4) {
+      return ICSHandler.isPrivateIPAddress(mappedIPv4[1]);
+    }
+
+    if (!normalized.includes(':')) {
+      return false;
+    }
+
+    if (normalized === '::' || normalized === '::1') {
+      return true;
+    }
+
+    const firstHextet = parseInt(normalized.split(':')[0] || '0', 16);
+    return (
+      (firstHextet & 0xfe00) === 0xfc00 ||
+      (firstHextet & 0xffc0) === 0xfe80 ||
+      (firstHextet & 0xffc0) === 0xfec0 ||
+      (firstHextet & 0xff00) === 0xff00
+    );
   }
 
   /**
