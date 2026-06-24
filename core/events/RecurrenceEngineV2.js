@@ -48,11 +48,11 @@ export class RecurrenceEngineV2 {
     // Check cache
     const cacheKey = this.getCacheKey(event.id, rangeStart, rangeEnd, options);
     if (this.occurrenceCache.has(cacheKey)) {
-      return this.occurrenceCache.get(cacheKey);
+      return this.cloneOccurrences(this.occurrenceCache.get(cacheKey));
     }
 
     if (!event.recurring || !event.recurrenceRule) {
-      return [this.createOccurrence(event, event.start, event.end)];
+      return this.cloneOccurrences([this.createOccurrence(event, event.start, event.end)]);
     }
 
     const rule = RRuleParser.parse(event.recurrenceRule);
@@ -64,7 +64,8 @@ export class RecurrenceEngineV2 {
       currentDate: new Date(event.start),
       count: 0,
       tzOffsets: new Map(),
-      dstTransitions: []
+      dstTransitions: [],
+      stuckIterations: 0
     };
 
     // Pre-calculate DST transitions in range
@@ -85,21 +86,20 @@ export class RecurrenceEngineV2 {
 
         // Check exceptions and modifications
         if (occurrence) {
-          const dateKey = this.getDateKey(occurrence.start);
+          let shouldInclude = true;
 
           // Skip if exception
           if (this.isException(event.id, occurrence.start, rule)) {
             if (!includeCancelled) {
-              state.currentDate = this.getNextDate(state.currentDate, rule, timezone);
-              state.count++;
-              continue;
+              shouldInclude = false;
+            } else {
+              occurrence.status = 'cancelled';
+              occurrence.cancellationReason = this.getExceptionReason(event.id, occurrence.start);
             }
-            occurrence.status = 'cancelled';
-            occurrence.cancellationReason = this.getExceptionReason(event.id, occurrence.start);
           }
 
           // Apply modifications if any
-          if (includeModified) {
+          if (shouldInclude && includeModified) {
             const modified = this.getModifiedInstance(event.id, occurrence.start);
             if (modified) {
               Object.assign(occurrence, modified);
@@ -107,13 +107,25 @@ export class RecurrenceEngineV2 {
             }
           }
 
-          occurrences.push(occurrence);
+          if (shouldInclude) {
+            occurrences.push(occurrence);
+          }
         }
       }
 
       // Get next occurrence date
+      const previousTimestamp = state.currentDate.getTime();
       state.currentDate = this.getNextDate(state.currentDate, rule, timezone, state);
       state.count++;
+
+      if (state.currentDate.getTime() <= previousTimestamp) {
+        state.stuckIterations++;
+        if (state.stuckIterations >= 3) {
+          break;
+        }
+      } else {
+        state.stuckIterations = 0;
+      }
 
       // Check COUNT limit
       if (rule.count && state.count >= rule.count) {
@@ -129,7 +141,7 @@ export class RecurrenceEngineV2 {
     // Cache results
     this.cacheOccurrences(cacheKey, occurrences);
 
-    return occurrences;
+    return this.cloneOccurrences(occurrences);
   }
 
   /**
@@ -169,7 +181,7 @@ export class RecurrenceEngineV2 {
   /**
    * Get next occurrence date with complex pattern support
    */
-  getNextDate(currentDate, rule, timezone, state = {}) {
+  getNextDate(currentDate, rule, timezone, _state = {}) {
     const next = new Date(currentDate);
 
     switch (rule.freq) {
@@ -226,7 +238,7 @@ export class RecurrenceEngineV2 {
   /**
    * Get next weekly occurrence with BYDAY support
    */
-  getNextWeekly(date, rule, timezone) {
+  getNextWeekly(date, rule, _timezone) {
     const next = new Date(date);
 
     if (rule.byDay && rule.byDay.length > 0) {
@@ -276,7 +288,7 @@ export class RecurrenceEngineV2 {
   /**
    * Get next monthly occurrence with complex patterns
    */
-  getNextMonthly(date, rule, timezone) {
+  getNextMonthly(date, rule, _timezone) {
     const next = new Date(date);
 
     if (rule.byMonthDay && rule.byMonthDay.length > 0) {
@@ -372,7 +384,7 @@ export class RecurrenceEngineV2 {
   /**
    * Get next yearly occurrence
    */
-  getNextYearly(date, rule, timezone) {
+  getNextYearly(date, rule, _timezone) {
     const next = new Date(date);
 
     if (rule.byMonth && rule.byMonth.length > 0) {
@@ -617,13 +629,32 @@ export class RecurrenceEngineV2 {
    * Cache occurrences
    */
   cacheOccurrences(key, occurrences) {
-    this.occurrenceCache.set(key, occurrences);
+    this.occurrenceCache.set(key, this.cloneOccurrences(occurrences));
 
     // LRU eviction
     if (this.occurrenceCache.size > this.cacheSize) {
       const firstKey = this.occurrenceCache.keys().next().value;
       this.occurrenceCache.delete(firstKey);
     }
+  }
+
+  /**
+   * Clone occurrence results before returning or caching.
+   */
+  cloneOccurrences(occurrences) {
+    return occurrences.map(occurrence => ({
+      ...occurrence,
+      start: occurrence.start ? new Date(occurrence.start) : occurrence.start,
+      end: occurrence.end ? new Date(occurrence.end) : occurrence.end,
+      startUTC: occurrence.startUTC ? new Date(occurrence.startUTC) : occurrence.startUTC,
+      endUTC: occurrence.endUTC ? new Date(occurrence.endUTC) : occurrence.endUTC,
+      originalStart: occurrence.originalStart
+        ? new Date(occurrence.originalStart)
+        : occurrence.originalStart,
+      categories: Array.isArray(occurrence.categories)
+        ? [...occurrence.categories]
+        : occurrence.categories
+    }));
   }
 
   /**

@@ -1,6 +1,6 @@
 import { Event } from './Event.js';
 import { DateUtils } from '../calendar/DateUtils.js';
-import { RecurrenceEngine } from './RecurrenceEngine.js';
+import { RecurrenceEngineV2 } from './RecurrenceEngineV2.js';
 import { PerformanceOptimizer } from '../performance/PerformanceOptimizer.js';
 import { ConflictDetector } from '../conflicts/ConflictDetector.js';
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
@@ -39,6 +39,9 @@ export class EventStore {
 
     // Performance optimizer
     this.optimizer = new PerformanceOptimizer(config.performance);
+
+    // Recurrence expansion engine
+    this.recurrenceEngine = config.recurrenceEngine || new RecurrenceEngineV2();
 
     // Conflict detector
     this.conflictDetector = new ConflictDetector(this);
@@ -594,6 +597,20 @@ export class EventStore {
       return baseEvents;
     }
 
+    // Recurring series can start before the requested range but still have
+    // occurrences inside it, so include all recurring series as expansion
+    // candidates and let the recurrence engine filter by range.
+    const baseEventIds = new Set(baseEvents.map(event => event.id));
+    for (const eventId of this.indices.recurring) {
+      if (!baseEventIds.has(eventId)) {
+        const event = this.events.get(eventId);
+        if (event) {
+          baseEvents.push(event);
+          baseEventIds.add(eventId);
+        }
+      }
+    }
+
     // Expand recurring events
     const expandedEvents = [];
     baseEvents.forEach(event => {
@@ -630,7 +647,9 @@ export class EventStore {
 
     // Expand in the event's timezone for accurate recurrence calculation
     const eventTimezone = event.timeZone || timezone;
-    const occurrences = RecurrenceEngine.expandEvent(event, rangeStart, rangeEnd);
+    const occurrences = this.recurrenceEngine.expandEvent(event, rangeStart, rangeEnd, {
+      timezone: eventTimezone
+    });
 
     return occurrences.map((occurrence, index) => {
       // Create a new event instance for each occurrence
@@ -638,10 +657,11 @@ export class EventStore {
         id: `${event.id}_occurrence_${index}`,
         start: occurrence.start,
         end: occurrence.end,
-        timeZone: eventTimezone,
+        timeZone: occurrence.timezone || eventTimezone,
         metadata: {
           ...event.metadata,
           recurringEventId: event.id,
+          occurrenceId: occurrence.id,
           occurrenceIndex: index
         }
       });
