@@ -9,6 +9,8 @@ export class SearchWorkerManager {
     this.workerSupported = typeof Worker !== 'undefined';
     this.worker = null;
     this.indexReady = false;
+    this.indexMode = 'none';
+    this.workerExpectedCount = 0;
     this.pendingSearches = [];
 
     // Fallback to main thread if workers not available
@@ -19,7 +21,8 @@ export class SearchWorkerManager {
       chunkSize: 100, // Events per indexing batch
       maxWorkers: 4, // Max parallel workers
       indexThreshold: 1000, // Use workers above this event count
-      cacheSize: 50 // LRU cache for search results
+      cacheSize: 50, // LRU cache for search results
+      searchTimeout: 10000 // Worker search timeout in milliseconds
     };
 
     // Search result cache
@@ -35,7 +38,7 @@ export class SearchWorkerManager {
   initializeWorker() {
     if (!this.workerSupported) {
       // Use InvertedIndex as fallback
-      this.fallbackIndex = new InvertedIndex();
+      this.ensureFallbackIndex();
       return;
     }
 
@@ -51,13 +54,14 @@ export class SearchWorkerManager {
                     events[event.id] = event;
 
                     // Index each field
-                    const fields = ['title', 'description', 'location', 'category'];
+                    const fields = ['title', 'description', 'location', 'category', 'categories'];
                     for (const field of fields) {
                         const value = event[field];
                         if (!value) continue;
 
                         // Tokenize and index
-                        const tokens = tokenize(value.toLowerCase());
+                        const values = Array.isArray(value) ? value : [value];
+                        const tokens = values.flatMap(item => tokenize(String(item).toLowerCase()));
                         for (const token of tokens) {
                             if (!index[token]) {
                                 index[token] = new Set();
@@ -163,11 +167,19 @@ export class SearchWorkerManager {
             };
         `;
 
-    // Create worker from blob
-    const blob = new Blob([workerCode], { type: 'application/javascript' });
-    const workerUrl = URL.createObjectURL(blob);
-
+    let workerUrl = null;
     try {
+      if (
+        typeof Blob === 'undefined' ||
+        typeof URL === 'undefined' ||
+        typeof URL.createObjectURL !== 'function'
+      ) {
+        throw new Error('Blob workers are not supported in this environment');
+      }
+
+      // Create worker from blob
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      workerUrl = URL.createObjectURL(blob);
       this.worker = new Worker(workerUrl);
       this.setupWorkerHandlers();
 
@@ -180,10 +192,24 @@ export class SearchWorkerManager {
       // Clean up blob URL
       URL.revokeObjectURL(workerUrl);
     } catch (error) {
+      if (workerUrl) {
+        URL.revokeObjectURL(workerUrl);
+      }
       console.warn('Worker creation failed, falling back to main thread:', error);
       this.workerSupported = false;
+      this.ensureFallbackIndex();
+    }
+  }
+
+  /**
+   * Ensure a fallback index exists.
+   * @private
+   */
+  ensureFallbackIndex() {
+    if (!this.fallbackIndex) {
       this.fallbackIndex = new InvertedIndex();
     }
+    return this.fallbackIndex;
   }
 
   /**
@@ -191,7 +217,7 @@ export class SearchWorkerManager {
    */
   setupWorkerHandlers() {
     this.worker.onmessage = e => {
-      const { type, data } = e.data;
+      const { type } = e.data;
 
       switch (type) {
         case 'ready':
@@ -200,8 +226,10 @@ export class SearchWorkerManager {
           break;
 
         case 'indexed':
-          // Process pending searches
-          this.processPendingSearches();
+          if (e.data.count >= this.workerExpectedCount) {
+            this.indexMode = 'worker';
+            this.processPendingSearches();
+          }
           break;
 
         case 'results':
@@ -212,9 +240,12 @@ export class SearchWorkerManager {
 
     this.worker.onerror = error => {
       console.error('Worker error:', error);
+      this.rejectPendingSearches(new Error('Search worker failed'));
       // Fallback to main thread
       this.workerSupported = false;
-      this.fallbackIndex = new InvertedIndex();
+      this.worker = null;
+      this.ensureFallbackIndex().buildIndex(this.eventStore.getAllEvents());
+      this.indexMode = 'fallback';
     };
   }
 
@@ -223,17 +254,26 @@ export class SearchWorkerManager {
    */
   async indexEvents() {
     const events = this.eventStore.getAllEvents();
+    this.searchCache.clear();
+    this.cacheOrder = [];
 
     // Use main thread for small datasets
     if (events.length < this.config.indexThreshold) {
-      if (this.fallbackIndex) {
-        this.fallbackIndex.buildIndex(events);
+      this.ensureFallbackIndex().buildIndex(events);
+      this.indexMode = 'fallback';
+
+      if (this.worker && this.indexReady) {
+        this.worker.postMessage({ type: 'clear' });
       }
       return;
     }
 
     // Chunk events for worker
     if (this.worker && this.indexReady) {
+      this.indexMode = 'worker-indexing';
+      this.workerExpectedCount = events.length;
+      this.worker.postMessage({ type: 'clear' });
+
       for (let i = 0; i < events.length; i += this.config.chunkSize) {
         const chunk = events.slice(i, i + this.config.chunkSize);
         this.worker.postMessage({
@@ -241,7 +281,11 @@ export class SearchWorkerManager {
           data: { events: chunk }
         });
       }
+      return;
     }
+
+    this.ensureFallbackIndex().buildIndex(events);
+    this.indexMode = 'fallback';
   }
 
   /**
@@ -257,9 +301,13 @@ export class SearchWorkerManager {
 
     // Use appropriate search method
     let results;
-    if (this.worker && this.indexReady) {
-      results = await this.workerSearch(query, options);
-    } else if (this.fallbackIndex) {
+    if (this.worker && this.indexMode === 'worker') {
+      try {
+        results = await this.workerSearch(query, options);
+      } catch {
+        results = this.directSearch(query, options);
+      }
+    } else if (this.fallbackIndex && this.indexMode === 'fallback') {
       results = this.fallbackIndex.search(query, options);
     } else {
       // Direct search as last resort
@@ -276,14 +324,20 @@ export class SearchWorkerManager {
    * Search using worker
    */
   workerSearch(query, options) {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const searchId = Date.now() + Math.random();
+      const timeoutId = setTimeout(() => {
+        this.pendingSearches = this.pendingSearches.filter(search => search.id !== searchId);
+        reject(new Error('Search worker timed out'));
+      }, options.timeout || this.config.searchTimeout);
 
       this.pendingSearches.push({
         id: searchId,
         query,
         options,
-        resolve
+        resolve,
+        reject,
+        timeoutId
       });
 
       this.worker.postMessage({
@@ -309,14 +363,23 @@ export class SearchWorkerManager {
       let score = 0;
 
       // Check each field
-      const fields = options.fields || ['title', 'description', 'location'];
+      const fields = options.fields || [
+        'title',
+        'description',
+        'location',
+        'category',
+        'categories'
+      ];
       for (const field of fields) {
         const value = event[field];
         if (!value) continue;
 
-        const valueLower = value.toLowerCase();
-        if (valueLower.includes(queryLower)) {
-          score += field === 'title' ? 20 : 10;
+        const values = Array.isArray(value) ? value : [value];
+        for (const item of values) {
+          const valueLower = String(item).toLowerCase();
+          if (valueLower.includes(queryLower)) {
+            score += field === 'title' ? 20 : 10;
+          }
         }
       }
 
@@ -340,6 +403,7 @@ export class SearchWorkerManager {
   handleSearchResults(data) {
     const pending = this.pendingSearches.find(s => s.id === data.id);
     if (pending) {
+      clearTimeout(pending.timeoutId);
       pending.resolve(data.results);
       this.pendingSearches = this.pendingSearches.filter(s => s.id !== data.id);
     }
@@ -366,6 +430,10 @@ export class SearchWorkerManager {
    * Cache search results with LRU eviction
    */
   cacheResults(key, results) {
+    if (this.searchCache.has(key)) {
+      this.cacheOrder = this.cacheOrder.filter(existingKey => existingKey !== key);
+    }
+
     // Add to cache
     this.searchCache.set(key, results);
     this.cacheOrder.push(key);
@@ -383,6 +451,9 @@ export class SearchWorkerManager {
   clear() {
     this.searchCache.clear();
     this.cacheOrder = [];
+    this.indexMode = 'none';
+    this.workerExpectedCount = 0;
+    this.rejectPendingSearches(new Error('Search index was cleared'));
 
     if (this.worker) {
       this.worker.postMessage({ type: 'clear' });
@@ -402,6 +473,18 @@ export class SearchWorkerManager {
     }
     this.clear();
   }
+
+  /**
+   * Reject all pending worker searches.
+   * @private
+   */
+  rejectPendingSearches(error) {
+    for (const search of this.pendingSearches) {
+      clearTimeout(search.timeoutId);
+      search.reject(error);
+    }
+    this.pendingSearches = [];
+  }
 }
 
 /**
@@ -416,7 +499,8 @@ export class InvertedIndex {
       title: 2.0,
       description: 1.0,
       location: 1.5,
-      category: 1.5
+      category: 1.5,
+      categories: 1.5
     };
   }
 
@@ -434,7 +518,8 @@ export class InvertedIndex {
         const value = event[field];
         if (!value) continue;
 
-        const tokens = this.tokenize(value);
+        const values = Array.isArray(value) ? value : [value];
+        const tokens = values.flatMap(item => this.tokenize(String(item)));
         for (const token of tokens) {
           if (!this.index.has(token)) {
             this.index.set(token, new Map());

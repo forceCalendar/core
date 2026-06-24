@@ -4,8 +4,20 @@
 
 import { Calendar } from '../../core/calendar/Calendar.js';
 import { EventSearch } from '../../core/search/EventSearch.js';
+import { SearchWorkerManager } from '../../core/search/SearchWorkerManager.js';
 
 console.log('Testing Search and Filter functionality...\n');
+
+let failures = 0;
+
+function assert(condition, message) {
+    if (condition) {
+        console.log(`  ✅ ${message}`);
+    } else {
+        console.log(`  ❌ ${message}`);
+        failures++;
+    }
+}
 
 // Create calendar with diverse test events
 const calendar = new Calendar();
@@ -102,6 +114,7 @@ console.log(`Found ${results.length} results:`);
 results.forEach(event => {
     console.log(`  - ${event.title}`);
 });
+assert(results.length === 1, 'Text search finds one matching meeting title');
 
 // Test 2: Fuzzy search
 console.log('\n=== Test 2: Fuzzy Search ===');
@@ -114,6 +127,7 @@ console.log(`Found ${results.length} results with fuzzy matching:`);
 results.forEach(event => {
     console.log(`  - ${event.title}`);
 });
+assert(results.length === 1, 'Fuzzy search matches misspelled meeting query');
 
 // Test 3: Category filter
 console.log('\n=== Test 3: Category Filter ===');
@@ -125,6 +139,7 @@ console.log(`Found ${results.length} meetings:`);
 results.forEach(event => {
     console.log(`  - ${event.title} (${event.category})`);
 });
+assert(results.length === 2, 'Category filter finds both meetings');
 
 // Test 4: Date range filter
 console.log('\n=== Test 4: Date Range Filter ===');
@@ -139,6 +154,7 @@ console.log(`Found ${results.length} events in date range:`);
 results.forEach(event => {
     console.log(`  - ${event.title} (${event.start.toLocaleDateString()})`);
 });
+assert(results.length === 3, 'Date range filter finds Jan 15-20 events');
 
 // Test 5: All-day events filter
 console.log('\n=== Test 5: All-Day Events Filter ===');
@@ -150,6 +166,7 @@ console.log(`Found ${results.length} all-day events:`);
 results.forEach(event => {
     console.log(`  - ${event.title}`);
 });
+assert(results.length === 1 && results[0].title === 'Australia Day', 'All-day filter finds holiday');
 
 // Test 6: Events with reminders
 console.log('\n=== Test 6: Events with Reminders ===');
@@ -161,6 +178,7 @@ console.log(`Found ${results.length} events with reminders:`);
 results.forEach(event => {
     console.log(`  - ${event.title} (${event.reminders.length} reminders)`);
 });
+assert(results.length === 1 && results[0].id === 'deadline-1', 'Reminder filter finds deadline');
 
 // Test 7: Attendee filter
 console.log('\n=== Test 7: Attendee Filter ===');
@@ -172,6 +190,7 @@ console.log(`Found ${results.length} events with John:`);
 results.forEach(event => {
     console.log(`  - ${event.title}`);
 });
+assert(results.length === 1 && results[0].id === 'meeting-1', 'Attendee filter finds John meeting');
 
 // Test 8: Advanced search (text + filters)
 console.log('\n=== Test 8: Advanced Search ===');
@@ -183,6 +202,7 @@ console.log(`Found ${results.length} results:`);
 results.forEach(event => {
     console.log(`  - ${event.title} (${event.category})`);
 });
+assert(results.length === 2, 'Advanced search finds team meeting/social events');
 
 // Test 9: Get suggestions
 console.log('\n=== Test 9: Autocomplete Suggestions ===');
@@ -195,6 +215,7 @@ console.log(`Found ${suggestions.length} suggestions:`);
 suggestions.forEach(suggestion => {
     console.log(`  - ${suggestion}`);
 });
+assert(suggestions.length === 2, 'Autocomplete suggestions include product-related titles');
 
 // Test 10: Get unique values
 console.log('\n=== Test 10: Unique Values ===');
@@ -204,6 +225,7 @@ console.log(`Found ${categories.length} categories:`);
 categories.forEach(cat => {
     console.log(`  - ${cat}`);
 });
+assert(categories.length === 5, 'Unique category list has five entries');
 
 // Test 11: Group by category
 console.log('\n=== Test 11: Group By Category ===');
@@ -218,6 +240,7 @@ for (const [category, events] of Object.entries(grouped)) {
         console.log(`  - ${event.title}`);
     });
 }
+assert(grouped.meeting?.length === 2, 'Group by category includes two meetings');
 
 // Test 12: Location filter
 console.log('\n=== Test 12: Location Filter ===');
@@ -229,6 +252,7 @@ console.log(`Found ${results.length} events in rooms:`);
 results.forEach(event => {
     console.log(`  - ${event.title} @ ${event.location}`);
 });
+assert(results.length === 2, 'Custom location filter finds two room events');
 
 // Test 13: Recurring events
 console.log('\n=== Test 13: Recurring Events Filter ===');
@@ -240,5 +264,103 @@ console.log(`Found ${results.length} recurring events:`);
 results.forEach(event => {
     console.log(`  - ${event.title} (${event.recurrence})`);
 });
+assert(results.length === 1 && results[0].id === 'meeting-2', 'Recurring filter finds standup');
 
-console.log('\n✅ Search and Filter functionality test complete!');process.exit(0);
+// Test 14: SearchWorkerManager cache invalidation
+console.log('\n=== Test 14: SearchWorkerManager Cache Invalidation ===');
+const searchManager = new SearchWorkerManager(calendar.eventStore);
+await searchManager.indexEvents();
+
+let workerResults = await searchManager.search('Product');
+assert(workerResults.length === 1, 'Initial worker-manager search finds one product event');
+
+calendar.addEvent({
+    id: 'product-review-1',
+    title: 'Product Review',
+    description: 'Follow-up product review',
+    start: new Date('2025-02-01T10:00:00'),
+    end: new Date('2025-02-01T11:00:00'),
+    category: 'meeting'
+});
+
+await searchManager.indexEvents();
+workerResults = await searchManager.search('Product');
+assert(workerResults.length === 2, 'Reindex clears stale cached search results');
+searchManager.destroy();
+
+// Test 15: Browser worker support with a small dataset uses fallback index
+console.log('\n=== Test 15: Small Dataset Worker Fallback ===');
+const originalWorker = globalThis.Worker;
+let fakeWorker = null;
+
+class EmptySearchWorker {
+    constructor() {
+        this.messages = [];
+        fakeWorker = this;
+    }
+
+    postMessage(message) {
+        this.messages.push(message);
+
+        if (message.type === 'init') {
+            queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } }));
+        } else if (message.type === 'search') {
+            queueMicrotask(() =>
+                this.onmessage?.({
+                    data: {
+                        type: 'results',
+                        id: message.data.id,
+                        results: []
+                    }
+                })
+            );
+        } else if (message.type === 'index') {
+            queueMicrotask(() => this.onmessage?.({ data: { type: 'indexed', count: 0 } }));
+        }
+    }
+
+    terminate() {}
+}
+
+globalThis.Worker = EmptySearchWorker;
+
+const workerCalendar = new Calendar();
+workerCalendar.addEvent({
+    id: 'worker-alpha',
+    title: 'Worker Alpha',
+    description: 'Small dataset search fallback',
+    start: new Date('2025-03-01T09:00:00'),
+    end: new Date('2025-03-01T10:00:00'),
+    category: 'worker'
+});
+
+const smallDatasetManager = new SearchWorkerManager(workerCalendar.eventStore);
+await new Promise(resolve => setTimeout(resolve, 0));
+await smallDatasetManager.indexEvents();
+
+workerResults = await smallDatasetManager.search('Worker Alpha');
+assert(workerResults.length === 1, 'Small worker-capable dataset searches fallback index');
+assert(
+    smallDatasetManager.indexMode === 'fallback',
+    'Small worker-capable dataset records fallback as active index mode'
+);
+assert(
+    !fakeWorker?.messages.some(message => message.type === 'search'),
+    'Small worker-capable dataset does not send search to an unindexed worker'
+);
+
+smallDatasetManager.destroy();
+
+if (originalWorker) {
+    globalThis.Worker = originalWorker;
+} else {
+    delete globalThis.Worker;
+}
+
+if (failures > 0) {
+    console.log(`\n❌ Search and Filter test failed: ${failures} assertion(s)`);
+    process.exit(1);
+}
+
+console.log('\n✅ Search and Filter functionality test complete!');
+process.exit(0);
