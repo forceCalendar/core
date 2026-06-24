@@ -29,6 +29,7 @@ export class EventStore {
       /** @type {Map<string, Set<string>>} Status -> Set of event IDs */
       byStatus: new Map()
     };
+    this.eventIndexRefs = new Map();
 
     // Timezone manager for conversions (use singleton to share cache)
     this.timezoneManager = TimezoneManager.getInstance();
@@ -334,9 +335,6 @@ export class EventStore {
   getEventsForDate(date, timezone = null) {
     timezone = timezone || this.defaultTimezone;
 
-    // Use local date string for the query date (in the calendar's timezone)
-    const dateStr = DateUtils.getLocalDateString(date);
-
     // Collect candidate event IDs from indices
     const candidateIds = new Set();
 
@@ -409,22 +407,39 @@ export class EventStore {
 
     // Collect all events from those dates
     const checkedIds = new Set();
-    dates.forEach(date => {
-      // Use getLocalDateString to match the index key format (YYYY-MM-DD)
-      const dateStr = DateUtils.getLocalDateString(date);
-      const eventIds = this.indices.byDate.get(dateStr) || new Set();
+    const addCandidateIds = eventIds => {
+      if (!eventIds) return;
 
       eventIds.forEach(id => {
         if (!checkedIds.has(id) && id !== excludeId) {
           checkedIds.add(id);
-          const event = this.events.get(id);
-
-          if (event && event.overlaps({ start, end })) {
-            overlapping.push(event);
-          }
         }
       });
+    };
+
+    dates.forEach(date => {
+      // Use getLocalDateString to match the index key format (YYYY-MM-DD)
+      const dateStr = DateUtils.getLocalDateString(date);
+      addCandidateIds(this.indices.byDate.get(dateStr));
     });
+
+    // Lazy-indexed long events may not have every day in byDate. Use month
+    // buckets as candidates and rely on precise overlap filtering below.
+    const currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const endMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    while (currentMonth <= endMonth) {
+      const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+      addCandidateIds(this.indices.byMonth.get(monthKey));
+      currentMonth.setMonth(currentMonth.getMonth() + 1);
+    }
+
+    for (const id of checkedIds) {
+      const event = this.events.get(id);
+
+      if (event && event.overlaps({ start, end })) {
+        overlapping.push(event);
+      }
+    }
 
     return overlapping.sort((a, b) => a.start - b.start);
   }
@@ -647,6 +662,7 @@ export class EventStore {
     this.indices.recurring.clear();
     this.indices.byCategory.clear();
     this.indices.byStatus.clear();
+    this.eventIndexRefs.clear();
 
     this._notifyChange({
       type: 'clear',
@@ -687,6 +703,8 @@ export class EventStore {
    * @private
    */
   _indexEvent(event) {
+    this._createIndexRefs(event.id);
+
     // Check if should use lazy indexing for large date ranges
     if (this.optimizer.shouldUseLazyIndexing(event)) {
       this._indexEventLazy(event);
@@ -706,26 +724,14 @@ export class EventStore {
 
     dates.forEach(date => {
       const dateStr = DateUtils.getLocalDateString(date);
-
-      if (!this.indices.byDate.has(dateStr)) {
-        this.indices.byDate.set(dateStr, new Set());
-      }
-      this.indices.byDate.get(dateStr).add(event.id);
+      this._addToKeyedIndex('byDate', dateStr, event.id);
     });
-
-    // Index by month(s) using UTC
-    const startMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
-    const endMonth = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
 
     // Add to all months the event spans
     const currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
     while (currentMonth <= endDate) {
       const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
-
-      if (!this.indices.byMonth.has(monthKey)) {
-        this.indices.byMonth.set(monthKey, new Set());
-      }
-      this.indices.byMonth.get(monthKey).add(event.id);
+      this._addToKeyedIndex('byMonth', monthKey, event.id);
 
       currentMonth.setMonth(currentMonth.getMonth() + 1);
     }
@@ -733,24 +739,19 @@ export class EventStore {
     // Index by categories
     if (event.categories && event.categories.length > 0) {
       event.categories.forEach(category => {
-        if (!this.indices.byCategory.has(category)) {
-          this.indices.byCategory.set(category, new Set());
-        }
-        this.indices.byCategory.get(category).add(event.id);
+        this._addToKeyedIndex('byCategory', category, event.id);
       });
     }
 
     // Index by status
     if (event.status) {
-      if (!this.indices.byStatus.has(event.status)) {
-        this.indices.byStatus.set(event.status, new Set());
-      }
-      this.indices.byStatus.get(event.status).add(event.id);
+      this._addToKeyedIndex('byStatus', event.status, event.id);
     }
 
     // Index recurring events
     if (event.recurring) {
       this.indices.recurring.add(event.id);
+      this.eventIndexRefs.get(event.id).recurring = true;
     }
   }
 
@@ -759,8 +760,7 @@ export class EventStore {
    * @private
    */
   _indexEventLazy(event) {
-    // Create lazy index markers
-    const markers = this.optimizer.createLazyIndexMarkers(event);
+    this.optimizer.createLazyIndexMarkers(event);
 
     // Index only the boundaries initially (in event's local timezone)
     const eventStartLocal = event.getStartInTimezone(event.timeZone);
@@ -779,10 +779,7 @@ export class EventStore {
 
     firstWeekDates.forEach(date => {
       const dateStr = DateUtils.getLocalDateString(date);
-      if (!this.indices.byDate.has(dateStr)) {
-        this.indices.byDate.set(dateStr, new Set());
-      }
-      this.indices.byDate.get(dateStr).add(event.id);
+      this._addToKeyedIndex('byDate', dateStr, event.id);
     });
 
     // Index last week if different from first
@@ -796,10 +793,7 @@ export class EventStore {
 
       lastWeekDates.forEach(date => {
         const dateStr = DateUtils.getLocalDateString(date);
-        if (!this.indices.byDate.has(dateStr)) {
-          this.indices.byDate.set(dateStr, new Set());
-        }
-        this.indices.byDate.get(dateStr).add(event.id);
+        this._addToKeyedIndex('byDate', dateStr, event.id);
       });
     }
 
@@ -807,33 +801,53 @@ export class EventStore {
     const currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
     while (currentMonth <= endDate) {
       const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
-      if (!this.indices.byMonth.has(monthKey)) {
-        this.indices.byMonth.set(monthKey, new Set());
-      }
-      this.indices.byMonth.get(monthKey).add(event.id);
+      this._addToKeyedIndex('byMonth', monthKey, event.id);
       currentMonth.setMonth(currentMonth.getMonth() + 1);
     }
 
     // Index other properties normally
     if (event.categories && event.categories.length > 0) {
       event.categories.forEach(category => {
-        if (!this.indices.byCategory.has(category)) {
-          this.indices.byCategory.set(category, new Set());
-        }
-        this.indices.byCategory.get(category).add(event.id);
+        this._addToKeyedIndex('byCategory', category, event.id);
       });
     }
 
     if (event.status) {
-      if (!this.indices.byStatus.has(event.status)) {
-        this.indices.byStatus.set(event.status, new Set());
-      }
-      this.indices.byStatus.get(event.status).add(event.id);
+      this._addToKeyedIndex('byStatus', event.status, event.id);
     }
 
     if (event.recurring) {
       this.indices.recurring.add(event.id);
+      this.eventIndexRefs.get(event.id).recurring = true;
     }
+  }
+
+  /**
+   * Create reverse index references for an event.
+   * @private
+   */
+  _createIndexRefs(eventId) {
+    this.eventIndexRefs.set(eventId, {
+      byDate: new Set(),
+      byMonth: new Set(),
+      byCategory: new Set(),
+      byStatus: new Set(),
+      recurring: false
+    });
+  }
+
+  /**
+   * Add an event to a keyed index and record the reverse reference.
+   * @private
+   */
+  _addToKeyedIndex(indexName, key, eventId) {
+    const index = this.indices[indexName];
+    if (!index.has(key)) {
+      index.set(key, new Set());
+    }
+
+    index.get(key).add(eventId);
+    this.eventIndexRefs.get(eventId)?.[indexName].add(key);
   }
 
   /**
@@ -841,6 +855,22 @@ export class EventStore {
    * @private
    */
   _unindexEvent(event) {
+    const refs = this.eventIndexRefs.get(event.id);
+
+    if (refs) {
+      this._removeFromReferencedIndex('byDate', refs.byDate, event.id);
+      this._removeFromReferencedIndex('byMonth', refs.byMonth, event.id);
+      this._removeFromReferencedIndex('byCategory', refs.byCategory, event.id);
+      this._removeFromReferencedIndex('byStatus', refs.byStatus, event.id);
+
+      if (refs.recurring) {
+        this.indices.recurring.delete(event.id);
+      }
+
+      this.eventIndexRefs.delete(event.id);
+      return;
+    }
+
     // Remove from date indices
     for (const [dateStr, eventIds] of this.indices.byDate) {
       eventIds.delete(event.id);
@@ -875,6 +905,24 @@ export class EventStore {
 
     // Remove from recurring index
     this.indices.recurring.delete(event.id);
+  }
+
+  /**
+   * Remove an event from only the keys it was indexed into.
+   * @private
+   */
+  _removeFromReferencedIndex(indexName, keys, eventId) {
+    const index = this.indices[indexName];
+
+    for (const key of keys) {
+      const eventIds = index.get(key);
+      if (!eventIds) continue;
+
+      eventIds.delete(eventId);
+      if (eventIds.size === 0) {
+        index.delete(key);
+      }
+    }
   }
 
   /**
@@ -938,6 +986,18 @@ export class EventStore {
             Array.from(this.indices.byStatus.entries()).map(([k, v]) => [k, new Set(v)])
           )
         },
+        eventIndexRefs: new Map(
+          Array.from(this.eventIndexRefs.entries()).map(([eventId, refs]) => [
+            eventId,
+            {
+              byDate: new Set(refs.byDate),
+              byMonth: new Set(refs.byMonth),
+              byCategory: new Set(refs.byCategory),
+              byStatus: new Set(refs.byStatus),
+              recurring: refs.recurring
+            }
+          ])
+        ),
         version: this.version
       };
     }
@@ -981,6 +1041,7 @@ export class EventStore {
     if (this.batchBackup) {
       this.events = this.batchBackup.events;
       this.indices = this.batchBackup.indices;
+      this.eventIndexRefs = this.batchBackup.eventIndexRefs;
       this.version = this.batchBackup.version;
       this.batchBackup = null;
 
@@ -1154,7 +1215,6 @@ export class EventStore {
       cutoffDate.setMonth(cutoffDate.getMonth() - 6); // Default: 6 months ago
     }
 
-    const cutoffStr = cutoffDate.toDateString();
     let removed = 0;
 
     // Clean up date indices
@@ -1172,13 +1232,15 @@ export class EventStore {
         }
 
         if (!stillNeeded) {
+          for (const eventId of eventIds) {
+            this.eventIndexRefs.get(eventId)?.byDate.delete(dateStr);
+          }
           this.indices.byDate.delete(dateStr);
           removed++;
         }
       }
     }
 
-    console.log(`Optimized indices: removed ${removed} old date entries`);
     return removed;
   }
 

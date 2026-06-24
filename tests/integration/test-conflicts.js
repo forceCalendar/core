@@ -146,6 +146,32 @@ const summary = detector.checkConflicts({
 });
 assert(summary.hasConflicts === true, 'Overlap with busy-1 is detected');
 
+// Test 7: lazy-indexed long events are found in the middle of their range
+console.log('\n=== Test 7: Lazy long-event overlap detection ===');
+const lazyStore = new EventStore({ performance: { maxIndexDays: 7 } });
+lazyStore.addEvent({
+    id: 'long-1',
+    title: 'Long Campaign',
+    start: new Date('2025-01-01T00:00:00'),
+    end: new Date('2025-02-15T23:59:59')
+});
+
+const middleOverlaps = lazyStore.getOverlappingEvents(
+    new Date('2025-01-20T12:00:00'),
+    new Date('2025-01-20T13:00:00')
+);
+assert(
+    middleOverlaps.some(event => event.id === 'long-1'),
+    'Lazy-indexed long event is found from month index in middle of span'
+);
+assert(
+    lazyStore.hasConflicts(new Date('2025-01-20T12:00:00'), new Date('2025-01-20T13:00:00')),
+    'hasConflicts sees lazy-indexed long event in middle of span'
+);
+
+lazyStore.removeEvent('long-1');
+assert(!lazyStore.eventIndexRefs.has('long-1'), 'Reverse index refs are cleared on remove');
+
 if (failures > 0) {
     console.log(`\n❌ ConflictDetector test failed: ${failures} assertion(s)`);
     process.exit(1);
