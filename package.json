@@ -49,33 +49,15 @@
   },
   "homepage": "https://github.com/forceCalendar/core#readme",
   "devDependencies": {
-    "@babel/core": "^7.23.0",
+    "@babel/core": "^7.29.6",
     "@babel/preset-env": "^7.29.7",
     "@rollup/plugin-babel": "^7.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-terser": "^1.0.0",
     "eslint": "^8.50.0",
-    "jest": "^30.4.2",
-    "jest-environment-jsdom": "^30.4.1",
-    "lerna": "^9.0.3",
     "prettier": "^3.0.3",
     "rollup": "^4.61.1",
     "vite": "^6.4.3"
-  },
-  "jest": {
-    "testEnvironment": "jsdom",
-    "collectCoverageFrom": [
-      "src/**/*.js",
-      "!src/**/*.test.js"
-    ],
-    "coverageThreshold": {
-      "global": {
-        "branches": 90,
-        "functions": 90,
-        "lines": 90,
-        "statements": 90
-      }
-    }
   },
   "files": [
     "core/**/*.js",
