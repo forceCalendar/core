@@ -322,7 +322,7 @@ export class EventSearch {
 
     // Sort events within groups if requested
     if (sortEvents) {
-      for (const [key, eventList] of groups) {
+      for (const eventList of groups.values()) {
         eventList.sort((a, b) => a.start - b.start);
       }
     }

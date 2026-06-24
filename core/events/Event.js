@@ -366,8 +366,6 @@ export class Event {
    * @param {string} [timezone] - Timezone for the new dates
    */
   updateTimes(start, end, timezone) {
-    const tz = timezone || this.timeZone;
-
     this.start = start instanceof Date ? start : new Date(start);
     this.end = end instanceof Date ? end : new Date(end);
 
@@ -477,9 +475,9 @@ export class Event {
       throw new Error('Parameter must be an Event instance or have start/end properties');
     }
 
-    let thisStart = this.start;
+    const thisStart = this.start;
     let thisEnd = this.end;
-    let otherStart = otherEvent.start;
+    const otherStart = otherEvent.start;
     let otherEnd = otherEvent.end;
 
     // Normalize all-day event boundaries for consistent comparison.

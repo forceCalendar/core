@@ -507,7 +507,7 @@ export class DateUtils {
    * @param {string} timeZone - IANA timezone string
    * @returns {Date}
    */
-  static addHoursWithDST(date, hours, timeZone) {
+  static addHoursWithDST(date, hours, _timeZone) {
     const result = new Date(date);
 
     // UTC millisecond arithmetic is inherently DST-agnostic.
@@ -533,18 +533,6 @@ export class DateUtils {
     // Create date string in ISO format
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
-
-    // Use Intl API to get the UTC time for this local time in the timezone
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
 
     // Parse the local date in the target timezone
     const localDate = new Date(`${dateStr}T${timeStr}`);

@@ -50,7 +50,7 @@ async function main() {
     try {
         // Get all test files
         const files = await readdir(INTEGRATION_DIR);
-        const testFiles = files.filter(f => f.startsWith('test-') && f.endsWith('.js'));
+        const testFiles = files.filter(f => f.startsWith('test-') && f.endsWith('.js')).sort();
 
         if (testFiles.length === 0) {
             console.log(`${COLORS.yellow}No test files found!${COLORS.reset}`);

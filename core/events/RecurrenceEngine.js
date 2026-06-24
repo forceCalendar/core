@@ -165,7 +165,7 @@ export class RecurrenceEngine {
    * @param {string} [timezone] - Timezone for calculation
    * @returns {Date} Next occurrence date
    */
-  static getNextOccurrence(currentDate, rule, timezone = 'UTC') {
+  static getNextOccurrence(currentDate, rule, _timezone = 'UTC') {
     const next = new Date(currentDate);
 
     switch (rule.freq) {
@@ -331,7 +331,7 @@ export class RecurrenceEngine {
    * @param {string} [eventId] - Event ID for better exception tracking
    * @returns {boolean}
    */
-  static isException(date, rule, eventId = null) {
+  static isException(date, rule, _eventId = null) {
     if (!rule.exceptions || rule.exceptions.length === 0) {
       return false;
     }

@@ -11,17 +11,25 @@ import { TimezoneManager } from '../../core/timezone/TimezoneManager.js';
 console.log('Testing Lightning Calendar Core - Timezone Support');
 console.log('==================================================\n');
 
-// Create calendar with specific timezone
+let failures = 0;
+
+function assert(condition, message) {
+    if (condition) {
+        console.log(`  ✅ ${message}`);
+    } else {
+        console.log(`  ❌ ${message}`);
+        failures++;
+    }
+}
+
 const calendar = new Calendar({
     timeZone: 'America/New_York'
 });
 
-console.log('1. Calendar initialized with timezone:', calendar.getTimezone());
-console.log('   System timezone:', calendar.timezoneManager.getSystemTimezone());
-console.log('');
+console.log('=== Test 1: Calendar timezone configuration ===');
+assert(calendar.getTimezone() === 'America/New_York', 'Calendar initializes with configured timezone');
 
-// Test 1: Create event in New York time
-console.log('2. Creating event in New York time (10 AM)...');
+console.log('\n=== Test 2: Event UTC conversion ===');
 const nyEvent = new Event({
     id: 'test-event-1',
     title: 'Morning Meeting',
@@ -30,28 +38,13 @@ const nyEvent = new Event({
     timeZone: 'America/New_York'
 });
 
-console.log('   Event created:');
-console.log('   - Title:', nyEvent.title);
-console.log('   - Start (NY):', nyEvent.start);
-console.log('   - Start (UTC):', nyEvent.startUTC);
-console.log('   - Timezone:', nyEvent.timeZone);
-console.log('');
+assert(nyEvent.timeZone === 'America/New_York', 'Event stores its timezone');
+assert(
+    nyEvent.startUTC.toISOString() === '2024-12-24T15:00:00.000Z',
+    'New York 10:00 winter event converts to 15:00 UTC'
+);
 
-// Test 2: Convert to different timezones
-console.log('3. Converting event to different timezones...');
-const londonTime = nyEvent.getStartInTimezone('Europe/London');
-const tokyoTime = nyEvent.getStartInTimezone('Asia/Tokyo');
-const laTime = nyEvent.getStartInTimezone('America/Los_Angeles');
-
-console.log('   Start times in different timezones:');
-console.log('   - New York:', nyEvent.getStartInTimezone('America/New_York').toLocaleString());
-console.log('   - London:', londonTime.toLocaleString());
-console.log('   - Tokyo:', tokyoTime.toLocaleString());
-console.log('   - Los Angeles:', laTime.toLocaleString());
-console.log('');
-
-// Test 3: Add multiple events in different timezones
-console.log('4. Adding events in different timezones...');
+console.log('\n=== Test 3: Date queries across timezones ===');
 calendar.addEvent({
     id: 'ny-meeting',
     title: 'New York Meeting',
@@ -76,106 +69,46 @@ calendar.addEvent({
     timeZone: 'Asia/Tokyo'
 });
 
-console.log('   Added 3 events in different timezones');
-console.log('');
-
-// Test 4: Query events for a date in specific timezone
-console.log('5. Querying events for Dec 24, 2024 in different timezones...');
 const dec24 = new Date('2024-12-24');
-
 const nyEvents = calendar.getEventsForDate(dec24, 'America/New_York');
 const londonEvents = calendar.getEventsForDate(dec24, 'Europe/London');
 const tokyoEvents = calendar.getEventsForDate(dec24, 'Asia/Tokyo');
 
-console.log('   Events on Dec 24:');
-console.log('   - New York perspective:', nyEvents.length, 'events');
-nyEvents.forEach(e => console.log('     •', e.title));
+assert(nyEvents.length === 3, 'New York perspective finds three Dec 24 events');
+assert(londonEvents.length === 2, 'London perspective finds two Dec 24 events');
+assert(tokyoEvents.length === 0, 'Tokyo perspective finds no Dec 24 events');
 
-console.log('   - London perspective:', londonEvents.length, 'events');
-londonEvents.forEach(e => console.log('     •', e.title));
+console.log('\n=== Test 4: Timezone utility behavior ===');
+const tm = TimezoneManager.getInstance();
+const timeDiff = tm.getTimezoneDifference(
+    'America/New_York',
+    'America/Los_Angeles',
+    new Date('2024-12-24T12:00:00')
+);
 
-console.log('   - Tokyo perspective:', tokyoEvents.length, 'events');
-tokyoEvents.forEach(e => console.log('     •', e.title));
-console.log('');
+assert(Math.round(timeDiff) === 3, 'NY to LA timezone difference is three hours');
+assert(calendar.getTimezones().length >= 20, 'Common timezone list is populated');
 
-// Test 5: Timezone conversion utilities
-console.log('6. Testing timezone conversion utilities...');
-const now = new Date();
-const tm = new TimezoneManager();
-
-const nyToLa = tm.convertTimezone(now, 'America/New_York', 'America/Los_Angeles');
-const timeDiff = tm.getTimezoneDifference('America/New_York', 'America/Los_Angeles');
-
-console.log('   Current time conversions:');
-console.log('   - Now (local):', now.toLocaleString());
-console.log('   - NY to LA conversion:', nyToLa.toLocaleString());
-console.log('   - Time difference (hours):', timeDiff);
-console.log('');
-
-// Test 6: Format in timezone
-console.log('7. Testing date formatting in timezones...');
-const testDate = new Date('2024-12-24T15:30:00Z');
-
-console.log('   Formatting UTC date in different timezones:');
-console.log('   - UTC:', testDate.toISOString());
-console.log('   - New York:', calendar.formatInTimezone(testDate, 'America/New_York'));
-console.log('   - London:', calendar.formatInTimezone(testDate, 'Europe/London'));
-console.log('   - Tokyo:', calendar.formatInTimezone(testDate, 'Asia/Tokyo'));
-console.log('   - Sydney:', calendar.formatInTimezone(testDate, 'Australia/Sydney'));
-console.log('');
-
-// Test 7: Get common timezones
-console.log('8. Getting common timezones...');
-const timezones = calendar.getTimezones();
-console.log('   Available timezones:', timezones.length);
-console.log('   Sample timezones:');
-timezones.slice(0, 5).forEach(tz => {
-    console.log(`   - ${tz.label}: ${tz.offset}`);
-});
-console.log('');
-
-// Test 8: DST handling
-console.log('9. Testing DST (Daylight Saving Time) handling...');
+console.log('\n=== Test 5: DST handling ===');
 const summerDate = new Date('2024-07-15T12:00:00');
 const winterDate = new Date('2024-12-15T12:00:00');
 
-const summerOffset = tm.getTimezoneOffset(summerDate, 'America/New_York');
-const winterOffset = tm.getTimezoneOffset(winterDate, 'America/New_York');
+assert(tm.isDST(summerDate, 'America/New_York') === true, 'New York observes DST in July');
+assert(tm.isDST(winterDate, 'America/New_York') === false, 'New York is not in DST in December');
+assert(
+    tm.getTimezoneOffset(winterDate, 'America/New_York') >
+        tm.getTimezoneOffset(summerDate, 'America/New_York'),
+    'Winter offset is larger than summer offset for New York'
+);
 
-console.log('   New York timezone offsets:');
-console.log('   - Summer (July):', summerOffset / 60, 'hours from UTC');
-console.log('   - Winter (December):', winterOffset / 60, 'hours from UTC');
-console.log('   - DST active in summer:', tm.isDST(summerDate, 'America/New_York'));
-console.log('   - DST active in winter:', tm.isDST(winterDate, 'America/New_York'));
-console.log('');
-
-// Test 9: Change calendar timezone
-console.log('10. Changing calendar timezone...');
-console.log('    Original timezone:', calendar.getTimezone());
+console.log('\n=== Test 6: Calendar timezone updates ===');
 calendar.setTimezone('Europe/London');
-console.log('    New timezone:', calendar.getTimezone());
-console.log('');
+assert(calendar.getTimezone() === 'Europe/London', 'Calendar timezone updates to Europe/London');
 
-// Performance test
-console.log('11. Performance test with 100 timezone conversions...');
-const startTime = Date.now();
-
-for (let i = 0; i < 100; i++) {
-    tm.convertTimezone(now, 'America/New_York', 'Asia/Tokyo');
+if (failures > 0) {
+    console.log(`\n❌ Timezone test failed: ${failures} assertion(s)`);
+    process.exit(1);
 }
 
-const duration = Date.now() - startTime;
-console.log('    Completed 100 conversions in', duration, 'ms');
-console.log('    Average time per conversion:', (duration / 100).toFixed(2), 'ms');
-console.log('');
-
-console.log('✅ All timezone tests completed successfully!');
-console.log('');
-console.log('Key timezone features demonstrated:');
-console.log('• Events store both wall-clock time and UTC');
-console.log('• Timezone-aware queries respect local dates');
-console.log('• DST transitions handled automatically');
-console.log('• Fast timezone conversions with caching');
-console.log('• Support for all major IANA timezones');
-console.log('• Critical for global Salesforce deployments');
+console.log('\n✅ Timezone tests completed successfully!');
 process.exit(0);

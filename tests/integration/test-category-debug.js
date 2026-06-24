@@ -1,50 +1,49 @@
 /**
- * Deep debug test for categories
+ * Test category normalization
  */
 
 import { Event } from '../../core/events/Event.js';
 
-console.log('Deep debugging categories...\n');
+console.log('Testing category normalization...\n');
 
-// Test the normalize function directly
+let failures = 0;
+
+function assert(condition, message) {
+    if (condition) {
+        console.log(`  ✅ ${message}`);
+    } else {
+        console.log(`  ❌ ${message}`);
+        failures++;
+    }
+}
+
 const testData = {
     id: 'test-1',
     title: 'Test Meeting',
     start: new Date('2025-01-15T10:00:00'),
     end: new Date('2025-01-15T11:00:00'),
-    category: 'meeting'  // Singular
+    category: 'meeting'
 };
 
-console.log('Input data:');
-console.log('  category:', testData.category);
-console.log('  categories:', testData.categories);
-
-// Call normalize directly
 const normalized = Event.normalize(testData);
+assert(Array.isArray(normalized.categories), 'Singular category normalizes to categories array');
+assert(normalized.categories[0] === 'meeting', 'Normalized categories include singular category');
 
-console.log('\nNormalized data:');
-console.log('  categories:', normalized.categories);
-console.log('  category still present?:', 'category' in normalized);
+const event = new Event(testData);
+assert(event.categories.length === 1, 'Event stores one category from singular input');
+assert(event.category === 'meeting', 'Event category getter returns first category');
 
-// Create an Event with it
-console.log('\nCreating Event...');
-console.log('Test data being passed:', testData);
-try {
-    const event = new Event(testData);
-    console.log('Event created successfully');
-    console.log('  event.categories:', event.categories);
-    console.log('  event.category (getter):', event.category);
+const event2 = new Event({
+    ...testData,
+    categories: ['meeting', 'important']
+});
+assert(event2.categories.length === 2, 'Event preserves categories array input');
+assert(event2.category === 'meeting', 'Event category getter returns first array category');
 
-    // Test with categories array directly
-    console.log('\nTesting with categories array...');
-    const event2 = new Event({
-        ...testData,
-        categories: ['meeting', 'important']
-    });
-    console.log('  event2.categories:', event2.categories);
-    console.log('  event2.category (getter):', event2.category);
-} catch (error) {
-    console.error('Error creating event:', error.message);
+if (failures > 0) {
+    console.log(`\n❌ Category normalization test failed: ${failures} assertion(s)`);
+    process.exit(1);
 }
 
+console.log('\n✅ Category normalization test complete!');
 process.exit(0);

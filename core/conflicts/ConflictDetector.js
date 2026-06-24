@@ -2,9 +2,6 @@
  * ConflictDetector - Detects scheduling conflicts between events
  * Checks for time overlaps, attendee conflicts, and resource conflicts
  */
-
-import { DateUtils } from '../calendar/DateUtils.js';
-
 export class ConflictDetector {
   /**
    * Create a new ConflictDetector

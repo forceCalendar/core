@@ -187,7 +187,7 @@ export class AdaptiveMemoryManager {
    * Increase cache sizes when memory is available
    */
   increaseCacheSizes() {
-    for (const [name, cacheInfo] of this.caches) {
+    for (const cacheInfo of this.caches.values()) {
       // Only increase if cache is being actively used
       const timeSinceAccess = Date.now() - cacheInfo.lastAccess;
       if (timeSinceAccess < 60000) {
@@ -262,7 +262,7 @@ export class AdaptiveMemoryManager {
    * Emergency clear all caches
    */
   emergencyClear() {
-    for (const [name, cacheInfo] of this.caches) {
+    for (const cacheInfo of this.caches.values()) {
       if (cacheInfo.cache.clear) {
         cacheInfo.cache.clear();
       }

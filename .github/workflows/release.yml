@@ -7,6 +7,7 @@ on:
 
 jobs:
   release:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     permissions:
@@ -27,7 +28,6 @@ jobs:
     - name: Run tests
       run: npm test
       timeout-minutes: 2
-      continue-on-error: true
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v3
@@ -35,8 +35,3 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Publish to NPM
-      run: npm publish --access public
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

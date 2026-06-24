@@ -1,54 +1,53 @@
 /**
- * Debug test for categories
+ * Test category search integration
  */
 
 import { Calendar } from '../../core/calendar/Calendar.js';
 import { EventSearch } from '../../core/search/EventSearch.js';
 
-console.log('Debugging categories...\n');
+console.log('Testing category search integration...\n');
+
+let failures = 0;
+
+function assert(condition, message) {
+    if (condition) {
+        console.log(`  ✅ ${message}`);
+    } else {
+        console.log(`  ❌ ${message}`);
+        failures++;
+    }
+}
 
 const calendar = new Calendar();
 
-// Add a simple test event
 calendar.addEvent({
     id: 'test-1',
     title: 'Test Meeting',
     start: new Date('2025-01-15T10:00:00'),
     end: new Date('2025-01-15T11:00:00'),
-    category: 'meeting'  // Singular
+    category: 'meeting'
 });
 
-// Get the event back
 const events = calendar.getEvents();
-console.log('Number of events:', events.length);
+assert(events.length === 1, 'Calendar stores one event');
+assert(events[0].category === 'meeting', 'Stored event exposes singular category getter');
+assert(Array.isArray(events[0].categories), 'Stored event exposes categories array');
 
-const event = events[0];
-console.log('\nEvent properties:');
-console.log('  event.category:', event.category);
-console.log('  event.categories:', event.categories);
-console.log('  typeof event.categories:', typeof event.categories);
-console.log('  Array.isArray(event.categories):', Array.isArray(event.categories));
-
-// Test search
 const searchEngine = new EventSearch(calendar.eventStore);
 
-console.log('\nFiltering by category "meeting":');
 const filtered = searchEngine.filter({
     categories: ['meeting']
 });
-console.log('  Found:', filtered.length, 'events');
+assert(filtered.length === 1, 'Category filter finds singular-category event');
 
-console.log('\nGetting unique values for "category":');
 const uniqueCategories = searchEngine.getUniqueValues('category');
-console.log('  Found categories:', uniqueCategories);
+assert(uniqueCategories.length === 1, 'Unique category list contains one category');
+assert(uniqueCategories[0] === 'meeting', 'Unique category list contains meeting');
 
-console.log('\nDirect event check:');
-const allEvents = calendar.eventStore.getAllEvents();
-console.log('  Total events in store:', allEvents.length);
-if (allEvents.length > 0) {
-    const firstEvent = allEvents[0];
-    console.log('  First event category:', firstEvent.category);
-    console.log('  First event categories:', firstEvent.categories);
+if (failures > 0) {
+    console.log(`\n❌ Category search integration test failed: ${failures} assertion(s)`);
+    process.exit(1);
 }
 
+console.log('\n✅ Category search integration test complete!');
 process.exit(0);

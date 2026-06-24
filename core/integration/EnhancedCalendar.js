@@ -411,19 +411,6 @@ export function createEnhancedCalendar(config) {
   calendar.cancelOccurrence('meeting-1', new Date('2024-01-15T10:00:00'), 'Public Holiday');
 
   // Example: Advanced search
-  calendar
-    .advancedSearch('standup', {
-      dateRange: {
-        start: new Date('2024-01-01'),
-        end: new Date('2024-01-31')
-      },
-      categories: ['meetings'],
-      modifiedOnly: false
-    })
-    .then(results => {
-      console.log('Search results:', results);
-    });
-
   return calendar;
 }
 
