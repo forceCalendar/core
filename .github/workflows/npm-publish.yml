@@ -95,6 +95,7 @@ jobs:
         echo "Bump type: $BUMP_TYPE"
 
         NEW_VERSION=$(npm version $BUMP_TYPE --no-git-tag-version)
+        npm run sync:version
         echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
         echo "Calculated new version: $NEW_VERSION"
 
@@ -110,6 +111,23 @@ jobs:
           echo "exists=false" >> $GITHUB_OUTPUT
         fi
 
+    - name: Commit and Push changes
+      if: steps.check_version.outputs.exists == 'false'
+      run: |
+        git add package.json package-lock.json core/index.js
+        git commit -m "Release ${{ steps.version_bump.outputs.new_version }}"
+
+        # Only create tag if it doesn't already exist
+        if ! git rev-parse "${{ steps.version_bump.outputs.new_version }}" >/dev/null 2>&1; then
+          git tag ${{ steps.version_bump.outputs.new_version }}
+        fi
+
+        git pull --rebase origin master
+        git push origin HEAD --tags
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Publish to NPM
       if: steps.check_version.outputs.exists == 'false'
       run: npm publish --access public
@@ -124,20 +142,9 @@ jobs:
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Commit and Push changes
+    - name: Create GitHub Release
       if: steps.check_version.outputs.exists == 'false'
       run: |
-        git add package.json package-lock.json
-        git commit -m "Release ${{ steps.version_bump.outputs.new_version }}"
-
-        # Only create tag if it doesn't already exist
-        if ! git rev-parse "${{ steps.version_bump.outputs.new_version }}" >/dev/null 2>&1; then
-          git tag ${{ steps.version_bump.outputs.new_version }}
-        fi
-
-        git pull --rebase origin master
-        git push origin HEAD --tags
-
         # Create an official GitHub Release (only if it doesn't exist)
         if ! gh release view ${{ steps.version_bump.outputs.new_version }} > /dev/null 2>&1; then
           gh release create ${{ steps.version_bump.outputs.new_version }} \

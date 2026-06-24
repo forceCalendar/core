@@ -16,7 +16,8 @@
     "lint:fix": "eslint core/ --ext .js --fix",
     "format": "prettier --write \"core/**/*.js\"",
     "format:check": "prettier --check \"core/**/*.js\"",
-    "quality": "npm run lint && npm run format:check"
+    "quality": "npm run lint && npm run format:check",
+    "sync:version": "node scripts/sync-version.js"
   },
   "exports": {
     ".": "./core/index.js",
