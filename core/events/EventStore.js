@@ -566,7 +566,7 @@ export class EventStore {
    * @returns {Event[]}
    */
   getEventsInRange(start, end, expandRecurringOrOptions = true, timezone = null) {
-    let expandRecurring = true;
+    let expandRecurring;
 
     if (typeof expandRecurringOrOptions === 'object' && expandRecurringOrOptions !== null) {
       // Options object form: getEventsInRange(start, end, { expandRecurring, timezone })

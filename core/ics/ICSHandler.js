@@ -106,7 +106,7 @@ export class ICSHandler {
 
       return results;
     } catch (error) {
-      throw new Error(`ICS import failed: ${error.message}`);
+      throw new Error(`ICS import failed: ${error.message}`, { cause: error });
     }
   }
 
@@ -221,9 +221,11 @@ export class ICSHandler {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        throw new Error(`Failed to import from URL: request timed out after ${requestTimeout}ms`);
+        throw new Error(`Failed to import from URL: request timed out after ${requestTimeout}ms`, {
+          cause: error
+        });
       }
-      throw new Error(`Failed to import from URL: ${error.message}`);
+      throw new Error(`Failed to import from URL: ${error.message}`, { cause: error });
     }
   }
 

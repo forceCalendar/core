@@ -173,7 +173,7 @@ export class Event {
       try {
         new Intl.DateTimeFormat('en-US', { timeZone: data.timeZone });
       } catch (e) {
-        throw new Error(`Invalid timezone: ${data.timeZone}`);
+        throw new Error(`Invalid timezone: ${data.timeZone}`, { cause: e });
       }
     }
 
@@ -182,7 +182,7 @@ export class Event {
       try {
         new Intl.DateTimeFormat('en-US', { timeZone: data.endTimeZone });
       } catch (e) {
-        throw new Error(`Invalid end timezone: ${data.endTimeZone}`);
+        throw new Error(`Invalid end timezone: ${data.endTimeZone}`, { cause: e });
       }
     }
   }

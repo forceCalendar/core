@@ -12,8 +12,8 @@
     "test": "node tests/run-all.js",
     "test:ics": "node tests/integration/test-ics.js",
     "test:search": "node tests/integration/test-search.js",
-    "lint": "eslint core/ --ext .js",
-    "lint:fix": "eslint core/ --ext .js --fix",
+    "lint": "eslint core/",
+    "lint:fix": "eslint core/ --fix",
     "format": "prettier --write \"core/**/*.js\"",
     "format:check": "prettier --check \"core/**/*.js\"",
     "quality": "npm run lint && npm run format:check",
@@ -50,15 +50,10 @@
   },
   "homepage": "https://github.com/forceCalendar/core#readme",
   "devDependencies": {
-    "@babel/core": "^7.29.6",
-    "@babel/preset-env": "^7.29.7",
-    "@rollup/plugin-babel": "^7.0.0",
-    "@rollup/plugin-node-resolve": "^16.0.3",
-    "@rollup/plugin-terser": "^1.0.0",
-    "eslint": "^8.50.0",
-    "prettier": "^3.0.3",
-    "rollup": "^4.61.1",
-    "vite": "^6.4.3"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "globals": "^17.7.0",
+    "prettier": "^3.0.3"
   },
   "files": [
     "core/**/*.js",
