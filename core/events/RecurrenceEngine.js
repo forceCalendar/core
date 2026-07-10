@@ -2,6 +2,8 @@ import { DateUtils } from '../calendar/DateUtils.js';
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
 import { RRuleParser } from './RRuleParser.js';
 
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
 /**
  * RecurrenceEngine - Handles expansion of recurring events
  * Full support for RFC 5545 (iCalendar) RRULE specification
@@ -9,6 +11,11 @@ import { RRuleParser } from './RRuleParser.js';
 export class RecurrenceEngine {
   // Hard limit to prevent resource exhaustion regardless of caller input
   static MAX_OCCURRENCES_HARD_LIMIT = 10000;
+
+  // expandEvent is typically called many times with the same RRULE string
+  // (every view render), so parsed rules are cached by their source string
+  static _ruleCache = new Map();
+  static _RULE_CACHE_MAX = 500;
 
   /**
    * Expand a recurring event into individual occurrences
@@ -26,14 +33,14 @@ export class RecurrenceEngine {
       return [{ start: event.start, end: event.end, timezone: event.timeZone }];
     }
 
-    const rule = this.parseRule(event.recurrenceRule);
+    const rule = this._getParsedRule(event.recurrenceRule);
     const occurrences = [];
     const duration = event.end - event.start;
     const eventTimezone = timezone || event.timeZone || 'UTC';
     const tzManager = TimezoneManager.getInstance();
 
     // Work in event's timezone for accurate recurrence calculation
-    let currentDate = new Date(event.start);
+    const currentDate = new Date(event.start);
     let count = 0;
 
     // If UNTIL is specified, use it as the range end
@@ -48,11 +55,18 @@ export class RecurrenceEngine {
     let stuckCount = 0;
     const maxStuckIterations = 3;
 
-    while (currentDate <= rangeEnd && count < maxOccurrences) {
+    // Compare on numeric timestamps in the loop — Date-object comparisons
+    // re-coerce through valueOf on every check
+    const rangeStartMs = rangeStart.getTime();
+    const rangeEndMs = rangeEnd.getTime();
+    const hasExceptions = !!(rule.exceptions && rule.exceptions.length > 0);
+    let currentMs = currentDate.getTime();
+
+    while (currentMs <= rangeEndMs && count < maxOccurrences) {
       // Check if this occurrence is within the range
-      if (currentDate >= rangeStart) {
-        const occurrenceStart = new Date(currentDate);
-        const occurrenceEnd = new Date(currentDate.getTime() + duration);
+      if (currentMs >= rangeStartMs) {
+        const occurrenceStart = new Date(currentMs);
+        const occurrenceEnd = new Date(currentMs + duration);
 
         // Handle DST transitions
         const currentOffset = tzManager.getTimezoneOffset(occurrenceStart, eventTimezone);
@@ -65,7 +79,7 @@ export class RecurrenceEngine {
         lastOffset = currentOffset;
 
         // Apply exceptions if any
-        if (!this.isException(occurrenceStart, rule, event.id)) {
+        if (!hasExceptions || !this.isException(occurrenceStart, rule, event.id)) {
           occurrences.push({
             start: occurrenceStart,
             end: occurrenceEnd,
@@ -77,12 +91,13 @@ export class RecurrenceEngine {
       }
 
       // Calculate next occurrence
-      const previousTimestamp = currentDate.getTime();
-      currentDate = this.getNextOccurrence(currentDate, rule, eventTimezone);
+      this._advanceInPlace(currentDate, rule);
+      const previousTimestamp = currentMs;
+      currentMs = currentDate.getTime();
       count++;
 
       // Safeguard: detect if date is not advancing (infinite loop risk)
-      if (currentDate.getTime() === previousTimestamp) {
+      if (currentMs === previousTimestamp) {
         stuckCount++;
         if (stuckCount >= maxStuckIterations) {
           console.warn('RecurrenceEngine: Date not advancing, breaking to prevent infinite loop');
@@ -159,6 +174,28 @@ export class RecurrenceEngine {
   }
 
   /**
+   * Parse a rule with caching for string rules (internal use by expandEvent).
+   * Cached rule objects are shared across calls and must not be mutated.
+   * @param {string|Object} recurrenceRule - RRULE string or rule object
+   * @returns {import('../../types.js').RecurrenceRule} Parsed rule object
+   * @private
+   */
+  static _getParsedRule(recurrenceRule) {
+    if (typeof recurrenceRule !== 'string') {
+      return this.parseRule(recurrenceRule);
+    }
+    let rule = this._ruleCache.get(recurrenceRule);
+    if (!rule) {
+      rule = this.parseRule(recurrenceRule);
+      if (this._ruleCache.size >= this._RULE_CACHE_MAX) {
+        this._ruleCache.clear();
+      }
+      this._ruleCache.set(recurrenceRule, rule);
+    }
+    return rule;
+  }
+
+  /**
    * Calculate the next occurrence based on the rule
    * @param {Date} currentDate - Current occurrence date
    * @param {Object} rule - Recurrence rule object
@@ -167,7 +204,18 @@ export class RecurrenceEngine {
    */
   static getNextOccurrence(currentDate, rule, _timezone = 'UTC') {
     const next = new Date(currentDate);
+    this._advanceInPlace(next, rule);
+    return next;
+  }
 
+  /**
+   * Advance a date to the next occurrence, mutating it in place.
+   * Used by expandEvent to avoid one Date allocation per step.
+   * @param {Date} next - Date to advance (mutated)
+   * @param {Object} rule - Recurrence rule object
+   * @private
+   */
+  static _advanceInPlace(next, rule) {
     switch (rule.freq) {
       case 'SECONDLY':
         next.setSeconds(next.getSeconds() + rule.interval);
@@ -187,21 +235,17 @@ export class RecurrenceEngine {
 
       case 'WEEKLY':
         if (rule.byDay && rule.byDay.length > 0) {
-          // Find next day that matches byDay
-          // Limit iterations to prevent infinite loop with malformed byDay
-          const maxIterations = 8; // 7 days + 1 for safety
-          let iterations = 0;
-          const originalDate = next.getDate();
-          next.setDate(next.getDate() + 1);
-          while (!this.matchesByDay(next, rule.byDay) && iterations < maxIterations) {
-            next.setDate(next.getDate() + 1);
-            iterations++;
-          }
-          // If no match found, fall back to simple weekly interval from original date
-          if (iterations >= maxIterations) {
+          // Jump straight to the next matching weekday using a delta table
+          // precompiled once per rule instead of stepping day by day
+          const daySet = rule._byDaySet || (rule._byDaySet = this._buildByDaySet(rule.byDay));
+          if (daySet.size > 0) {
+            const deltas =
+              rule._byDayDeltas || (rule._byDayDeltas = this._buildByDayDeltas(daySet));
+            next.setDate(next.getDate() + deltas[next.getDay()]);
+          } else {
+            // No valid day codes: fall back to simple weekly interval
             console.warn('RecurrenceEngine: Invalid byDay rule, falling back to weekly interval');
-            // Reset to original and add weekly interval
-            next.setDate(originalDate + 7 * rule.interval);
+            next.setDate(next.getDate() + 7 * rule.interval);
           }
         } else {
           // Simple weekly recurrence
@@ -215,7 +259,7 @@ export class RecurrenceEngine {
           const currentMonth = next.getMonth();
           next.setMonth(currentMonth + rule.interval);
           // Clamp to last day of month if day doesn't exist
-          const daysInMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+          const daysInMonth = this._daysInMonth(next.getFullYear(), next.getMonth());
           next.setDate(Math.min(rule.byMonthDay[0], daysInMonth));
         } else if (rule.byDay && rule.byDay.length > 0) {
           // Specific weekday of month (e.g., "2nd Tuesday")
@@ -246,8 +290,58 @@ export class RecurrenceEngine {
         // Unsupported frequency
         next.setTime(next.getTime() + 24 * 60 * 60 * 1000); // Daily fallback
     }
+  }
 
-    return next;
+  /**
+   * Days to add from each weekday (index 0-6) to reach the next weekday
+   * present in the given set
+   * @param {Set<number>} daySet - Non-empty set of weekday numbers
+   * @returns {number[]} Delta table indexed by Date#getDay()
+   * @private
+   */
+  static _buildByDayDeltas(daySet) {
+    const deltas = new Array(7);
+    for (let dow = 0; dow < 7; dow++) {
+      for (let d = 1; d <= 7; d++) {
+        if (daySet.has((dow + d) % 7)) {
+          deltas[dow] = d;
+          break;
+        }
+      }
+    }
+    return deltas;
+  }
+
+  /**
+   * Number of days in a month without allocating a Date
+   * @param {number} year - Full year
+   * @param {number} month - Month index (0-11)
+   * @returns {number}
+   * @private
+   */
+  static _daysInMonth(year, month) {
+    if (month === 1) {
+      return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
+    }
+    return DAYS_IN_MONTH[month];
+  }
+
+  /**
+   * Build a Set of numeric weekdays (0-6) from BYDAY codes
+   * @param {Array<string>} byDay - Array of day codes (e.g., ['MO', '2TU'])
+   * @returns {Set<number>} Weekday numbers; invalid codes are skipped
+   * @private
+   */
+  static _buildByDaySet(byDay) {
+    const dayMap = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+    const set = new Set();
+    for (const day of byDay) {
+      const match = /^(-?\d+)?([A-Z]{2})$/.exec(day);
+      if (match && dayMap[match[2]] !== undefined) {
+        set.add(dayMap[match[2]]);
+      }
+    }
+    return set;
   }
 
   /**

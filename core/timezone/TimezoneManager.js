@@ -39,11 +39,19 @@ export class TimezoneManager {
     this.database = new TimezoneDatabase();
 
     // Cache timezone offsets for performance
+    // offsetCache: Map<timezone, Map<15-minute UTC bucket, offset>>
     this.offsetCache = new Map();
     this.dstCache = new Map();
 
+    // Intl.DateTimeFormat construction is ~50x the cost of using one,
+    // so formatters are cached per timezone and reused
+    this.formatterCache = new Map();
+
     // Cache size management
     this.maxCacheSize = 1000;
+    // ~20k 15-minute buckets per zone (≈ a few hundred KB worst case) covers
+    // multi-year expansions without evicting entries mid-scan
+    this.maxOffsetBucketsPerZone = 20000;
     this.cacheHits = 0;
     this.cacheMisses = 0;
   }
@@ -109,66 +117,104 @@ export class TimezoneManager {
     // Resolve any aliases
     timezone = this.database.resolveAlias(timezone);
 
-    // Check cache first
-    const cacheKey = `${timezone}_${date.getFullYear()}_${date.getMonth()}_${date.getDate()}_${date.getHours()}`;
-    if (this.offsetCache.has(cacheKey)) {
-      this.cacheHits++;
-      this._manageCacheSize();
-      return this.offsetCache.get(cacheKey);
+    // Offsets only change at DST transitions, which occur on 15-minute UTC
+    // boundaries worldwide — one cached entry covers each 15-minute bucket
+    const bucket = Math.floor(date.getTime() / 900000);
+    let zoneCache = this.offsetCache.get(timezone);
+    if (zoneCache) {
+      const cached = zoneCache.get(bucket);
+      if (cached !== undefined) {
+        this.cacheHits++;
+        return cached;
+      }
+    } else {
+      zoneCache = new Map();
+      this.offsetCache.set(timezone, zoneCache);
     }
 
     this.cacheMisses++;
 
+    let offset;
+
     // Try using Intl API if available (best option for browser/Node.js environments)
     if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
       try {
-        const formatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: timezone,
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false
-        });
-
         // Create same date in target timezone
-        const parts = formatter.formatToParts(date);
-        const tzDate = new Date(
-          parts.find(p => p.type === 'year').value,
-          parts.find(p => p.type === 'month').value - 1,
-          parts.find(p => p.type === 'day').value,
-          parts.find(p => p.type === 'hour').value,
-          parts.find(p => p.type === 'minute').value,
-          parts.find(p => p.type === 'second').value
-        );
-
-        const offset = (tzDate.getTime() - date.getTime()) / (1000 * 60);
-        this.offsetCache.set(cacheKey, -offset);
-        this._manageCacheSize();
-        return -offset;
+        const parts = this._getFormatter(timezone).formatToParts(date);
+        let year, month, day, hour, minute, second;
+        for (const part of parts) {
+          switch (part.type) {
+            case 'year':
+              year = +part.value;
+              break;
+            case 'month':
+              month = +part.value;
+              break;
+            case 'day':
+              day = +part.value;
+              break;
+            case 'hour':
+              hour = +part.value;
+              break;
+            case 'minute':
+              minute = +part.value;
+              break;
+            case 'second':
+              second = +part.value;
+              break;
+          }
+        }
+        const tzDate = new Date(year, month - 1, day, hour, minute, second);
+        offset = -((tzDate.getTime() - date.getTime()) / (1000 * 60));
       } catch (e) {
         // Fallback to database calculation
       }
     }
 
-    // Fallback: Use timezone database
-    const tzData = this.database.getTimezone(timezone);
-    if (!tzData) {
-      throw new Error(`Unknown timezone: ${timezone}`);
+    if (offset === undefined) {
+      // Fallback: Use timezone database
+      const tzData = this.database.getTimezone(timezone);
+      if (!tzData) {
+        throw new Error(`Unknown timezone: ${timezone}`);
+      }
+
+      offset = tzData.offset;
+
+      // Apply DST if applicable
+      if (tzData.dst && this.isDST(date, timezone, tzData.dst)) {
+        offset += tzData.dst.offset;
+      }
     }
 
-    let offset = tzData.offset;
-
-    // Apply DST if applicable
-    if (tzData.dst && this.isDST(date, timezone, tzData.dst)) {
-      offset += tzData.dst.offset;
+    if (zoneCache.size >= this.maxOffsetBucketsPerZone) {
+      zoneCache.clear();
     }
-
-    this.offsetCache.set(cacheKey, offset);
-    this._manageCacheSize();
+    zoneCache.set(bucket, offset);
     return offset;
+  }
+
+  /**
+   * Get a cached Intl.DateTimeFormat for a timezone
+   * @param {string} timezone - Timezone identifier
+   * @returns {Intl.DateTimeFormat}
+   * @private
+   */
+  _getFormatter(timezone) {
+    let formatter = this.formatterCache.get(timezone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+      this.formatterCache.set(timezone, formatter);
+    }
+    return formatter;
   }
 
   /**
@@ -449,7 +495,7 @@ export class TimezoneManager {
         : 0;
 
     return {
-      offsetCacheSize: this.offsetCache.size,
+      offsetCacheSize: [...this.offsetCache.values()].reduce((n, m) => n + m.size, 0),
       dstCacheSize: this.dstCache.size,
       maxCacheSize: this.maxCacheSize,
       cacheHits: this.cacheHits,
@@ -463,16 +509,8 @@ export class TimezoneManager {
    * @private
    */
   _manageCacheSize() {
-    // Clear caches if they get too large
-    if (this.offsetCache.size > this.maxCacheSize) {
-      // Remove first half of entries (oldest)
-      const entriesToRemove = Math.floor(this.offsetCache.size / 2);
-      const keys = Array.from(this.offsetCache.keys());
-      for (let i = 0; i < entriesToRemove; i++) {
-        this.offsetCache.delete(keys[i]);
-      }
-    }
-
+    // Offset cache size is managed per-zone at insertion time in
+    // getTimezoneOffset; only the DST cache needs periodic eviction here
     if (this.dstCache.size > this.maxCacheSize / 2) {
       const entriesToRemove = Math.floor(this.dstCache.size / 2);
       const keys = Array.from(this.dstCache.keys());
