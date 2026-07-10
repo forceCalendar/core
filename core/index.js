@@ -32,7 +32,7 @@ export { ConflictDetector } from './conflicts/ConflictDetector.js';
 export { EnhancedCalendar } from './integration/EnhancedCalendar.js';
 
 // Version — keep in sync with package.json
-export const VERSION = '2.2.0';
+export const VERSION = '2.3.0';
 
 // Default export
 export { Calendar as default } from './calendar/Calendar.js';
