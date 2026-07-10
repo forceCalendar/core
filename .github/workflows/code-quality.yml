@@ -28,7 +28,7 @@ jobs:
       run: npm ci
 
     - name: Run ESLint
-      run: npx eslint core/ --ext .js --format stylish
+      run: npx eslint core/ --format stylish
       continue-on-error: false
 
   format:
@@ -90,5 +90,5 @@ jobs:
 
     - name: Check code complexity
       run: |
-        npx eslint core/ --ext .js --rule '{"complexity": ["warn", 15]}' --format stylish || true
+        npx eslint core/ --rule '{"complexity": ["warn", 15]}' --format stylish || true
         echo "Complexity check complete (warnings only)"
