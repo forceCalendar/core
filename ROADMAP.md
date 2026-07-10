@@ -11,14 +11,19 @@ This roadmap covers the whole forceCalendar organization, maintained in the flag
 ## Now (next 1–2 releases)
 
 ### Recurrence performance parity
-Our own benchmarks show RRULE expansion is slower than the `rrule` library across all five published scenarios. This is the top engineering priority:
-- Profile `RecurrenceEngineV2` expansion paths; eliminate per-occurrence allocation and redundant timezone conversions
-- Memoize expanded windows in the existing LRU layer, keyed by (rule, range)
-- Add a lazy occurrence iterator so callers can take N occurrences without expanding the full window
-- Target: within 2× of `rrule` on every published scenario, tracked publicly on the benchmark dashboard
+**Status: largely achieved.** v2.1.70 removed the timezone-cache pathologies (the worst
+scenario was 1,200× slower than `rrule`; it became ~5×), and the numeric-iteration fast
+path brought DAILY/WEEKLY expansion to **1.8–2.2× of `rrule`** — at the published 2×
+target. Remaining work:
+- MONTHLY/YEARLY still use the general Date-stepping loop (~4–8× on microsecond-scale
+  workloads); extend numeric iteration if profiling shows real-world need
+- Add a lazy occurrence iterator so callers can take N occurrences without expanding
+  the full window
 
 ### TypeScript declarations
-Types today are JSDoc-only. Generate and ship `.d.ts` files from JSDoc (`tsc --emitDeclarationOnly` with `allowJs`/`checkJs`) so TypeScript consumers get first-class autocompletion without the project converting to TS.
+**Status: shipped in v2.2.0.** Declarations are generated from JSDoc at publish time
+and wired into every subpath export. Remaining: tighten the loosest `any`-typed
+surfaces as JSDoc coverage improves.
 
 ## Next
 

@@ -47,6 +47,11 @@ export class TimezoneManager {
     // so formatters are cached per timezone and reused
     this.formatterCache = new Map();
 
+    // Discovered offset-transition instants per zone:
+    // Map<timezone, {from: number, to: number, transitions: number[]}>
+    // covering [from, to] with a sorted list of transition timestamps
+    this.transitionCache = new Map();
+
     // Cache size management
     this.maxCacheSize = 1000;
     // ~20k 15-minute buckets per zone (≈ a few hundred KB worst case) covers
@@ -165,7 +170,11 @@ export class TimezoneManager {
           }
         }
         const tzDate = new Date(year, month - 1, day, hour, minute, second);
-        offset = -((tzDate.getTime() - date.getTime()) / (1000 * 60));
+        // formatToParts carries no milliseconds, so compare against the
+        // whole-second part of the input or sub-second noise leaks into
+        // the offset (e.g. 660.0042 instead of 660)
+        const wholeSecondMs = Math.floor(date.getTime() / 1000) * 1000;
+        offset = -((tzDate.getTime() - wholeSecondMs) / (1000 * 60));
       } catch (e) {
         // Fallback to database calculation
       }
@@ -191,6 +200,74 @@ export class TimezoneManager {
     }
     zoneCache.set(bucket, offset);
     return offset;
+  }
+
+  /**
+   * Find the next instant at which the zone's UTC offset changes
+   * @param {string} timezone - Timezone identifier
+   * @param {number} fromMs - Search from this timestamp (exclusive)
+   * @param {number} toMs - Search up to this timestamp (inclusive)
+   * @returns {number} Timestamp of the first offset change after fromMs, or Infinity
+   */
+  getNextTransition(timezone, fromMs, toMs) {
+    if (fromMs >= toMs) {
+      return Infinity;
+    }
+    timezone = this.database.resolveAlias(timezone);
+    let cached = this.transitionCache.get(timezone);
+    if (!cached || fromMs < cached.from || toMs > cached.to) {
+      // Extend coverage generously so repeated expansions over the same
+      // span hit the cache
+      const from = Math.min(fromMs, cached ? cached.from : fromMs);
+      const to = Math.max(toMs, cached ? cached.to : toMs);
+      cached = { from, to, transitions: this._scanTransitions(timezone, from, to) };
+      this.transitionCache.set(timezone, cached);
+    }
+    for (const t of cached.transitions) {
+      if (t > fromMs) {
+        return t <= toMs ? t : Infinity;
+      }
+    }
+    return Infinity;
+  }
+
+  /**
+   * Scan a range for offset transitions. Probes in 7-day steps (shorter
+   * than any gap between real-world transitions, including Ramadan DST
+   * suspensions) and binary-searches each change to the exact instant.
+   * @param {string} timezone - Resolved timezone identifier
+   * @param {number} fromMs - Range start
+   * @param {number} toMs - Range end
+   * @returns {number[]} Sorted transition timestamps
+   * @private
+   */
+  _scanTransitions(timezone, fromMs, toMs) {
+    const WEEK = 7 * 86400000;
+    const transitions = [];
+    const offsetAt = ms => this.getTimezoneOffset(new Date(ms), timezone);
+    let lo = fromMs;
+    let loOffset = offsetAt(lo);
+    while (lo < toMs) {
+      const hi = Math.min(lo + WEEK, toMs);
+      const hiOffset = offsetAt(hi);
+      if (hiOffset !== loOffset) {
+        // Binary search for the first ms with the new offset
+        let a = lo;
+        let b = hi;
+        while (b - a > 1) {
+          const mid = Math.floor((a + b) / 2);
+          if (offsetAt(mid) === loOffset) {
+            a = mid;
+          } else {
+            b = mid;
+          }
+        }
+        transitions.push(b);
+        loOffset = hiOffset;
+      }
+      lo = hi;
+    }
+    return transitions;
   }
 
   /**
@@ -471,6 +548,7 @@ export class TimezoneManager {
   clearCache() {
     this.offsetCache.clear();
     this.dstCache.clear();
+    this.transitionCache.clear();
     this.cacheHits = 0;
     this.cacheMisses = 0;
   }

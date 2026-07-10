@@ -34,19 +34,71 @@ export class RecurrenceEngine {
     }
 
     const rule = this._getParsedRule(event.recurrenceRule);
-    const occurrences = [];
     const duration = event.end - event.start;
     const eventTimezone = timezone || event.timeZone || 'UTC';
     const tzManager = TimezoneManager.getInstance();
-
-    // Work in event's timezone for accurate recurrence calculation
-    const currentDate = new Date(event.start);
-    let count = 0;
 
     // If UNTIL is specified, use it as the range end
     if (rule.until && rule.until < rangeEnd) {
       rangeEnd = rule.until;
     }
+
+    // DAILY and WEEKLY series iterate on numeric timestamps (no Date
+    // arithmetic per step); other frequencies use the general loop
+    let occurrences = null;
+    if (rule.freq === 'DAILY' || rule.freq === 'WEEKLY') {
+      occurrences = this._expandFast(
+        event,
+        rule,
+        rangeStart.getTime(),
+        rangeEnd.getTime(),
+        maxOccurrences,
+        eventTimezone,
+        tzManager,
+        duration
+      );
+    }
+    if (!occurrences) {
+      occurrences = this._expandGeneral(
+        event,
+        rule,
+        rangeStart.getTime(),
+        rangeEnd.getTime(),
+        maxOccurrences,
+        eventTimezone,
+        tzManager,
+        duration
+      );
+    }
+
+    // Apply BYSETPOS filtering if present and not already handled by MONTHLY+byDay
+    if (rule.bySetPos && rule.bySetPos.length > 0 && rule.freq !== 'MONTHLY') {
+      return this._applyBySetPos(occurrences, rule);
+    }
+
+    return occurrences;
+  }
+
+  /**
+   * General expansion loop: advances a Date cursor per step. Handles every
+   * frequency and degenerate rules (non-advancing dates, invalid intervals).
+   * @private
+   */
+  static _expandGeneral(
+    event,
+    rule,
+    rangeStartMs,
+    rangeEndMs,
+    maxOccurrences,
+    eventTimezone,
+    tzManager,
+    duration
+  ) {
+    const occurrences = [];
+
+    // Work in event's timezone for accurate recurrence calculation
+    const currentDate = new Date(event.start);
+    let count = 0;
 
     // Track DST transitions for proper timezone handling
     let lastOffset = tzManager.getTimezoneOffset(currentDate, eventTimezone);
@@ -57,8 +109,6 @@ export class RecurrenceEngine {
 
     // Compare on numeric timestamps in the loop — Date-object comparisons
     // re-coerce through valueOf on every check
-    const rangeStartMs = rangeStart.getTime();
-    const rangeEndMs = rangeEnd.getTime();
     const hasExceptions = !!(rule.exceptions && rule.exceptions.length > 0);
     let currentMs = currentDate.getTime();
 
@@ -113,12 +163,177 @@ export class RecurrenceEngine {
       }
     }
 
-    // Apply BYSETPOS filtering if present and not already handled by MONTHLY+byDay
-    if (rule.bySetPos && rule.bySetPos.length > 0 && rule.freq !== 'MONTHLY') {
-      return this._applyBySetPos(occurrences, rule);
+    return occurrences;
+  }
+
+  /**
+   * Numeric expansion loop for DAILY and WEEKLY rules.
+   *
+   * Between DST transitions a wall-clock-preserving day step is a constant
+   * number of milliseconds, so the loop is pure numeric addition. Transition
+   * instants — in the system timezone (which defines Date arithmetic) and in
+   * the event's timezone (which drives occurrence adjustment) — are
+   * discovered by binary search and cached, so only the one step that
+   * crosses a transition falls back to Date arithmetic, and only the first
+   * occurrence after a transition queries a timezone offset.
+   *
+   * Produces output identical to _expandGeneral for the rules it accepts;
+   * returns null to delegate anything it cannot handle exactly.
+   * @private
+   */
+  static _expandFast(
+    event,
+    rule,
+    rangeStartMs,
+    rangeEndMs,
+    maxOccurrences,
+    eventTimezone,
+    tzManager,
+    duration
+  ) {
+    const DAY = 86400000;
+    let dayDeltas = null;
+    let stepDays = 0;
+    let weekday = 0;
+
+    const startDate = new Date(event.start);
+    if (rule.freq === 'WEEKLY' && rule.byDay && rule.byDay.length > 0) {
+      const daySet = rule._byDaySet || (rule._byDaySet = this._buildByDaySet(rule.byDay));
+      if (daySet.size === 0) {
+        return null; // invalid byDay — general loop handles the fallback warning
+      }
+      dayDeltas = rule._byDayDeltas || (rule._byDayDeltas = this._buildByDayDeltas(daySet));
+      weekday = startDate.getDay();
+    } else {
+      stepDays = (rule.freq === 'DAILY' ? 1 : 7) * rule.interval;
+      if (!Number.isInteger(stepDays) || stepDays <= 0) {
+        return null; // degenerate interval — general loop's stuck detection applies
+      }
+    }
+
+    const occurrences = [];
+    let currentMs = startDate.getTime();
+    if (Number.isNaN(currentMs)) {
+      return null;
+    }
+    let count = 0;
+    const hasExceptions = !!(rule.exceptions && rule.exceptions.length > 0);
+
+    let lastOffset = tzManager.getTimezoneOffset(startDate, eventTimezone);
+    let nextEventTzTransition = tzManager.getNextTransition(eventTimezone, currentMs, rangeEndMs);
+    let nextSystemTransition = this._nextSystemTransition(currentMs, rangeEndMs);
+
+    while (currentMs <= rangeEndMs && count < maxOccurrences) {
+      if (currentMs >= rangeStartMs) {
+        const occurrenceStart = new Date(currentMs);
+        const occurrenceEnd = new Date(currentMs + duration);
+
+        // Only the first occurrence past a transition needs an offset check
+        if (currentMs >= nextEventTzTransition) {
+          const currentOffset = tzManager.getTimezoneOffset(occurrenceStart, eventTimezone);
+          if (currentOffset !== lastOffset) {
+            const offsetDiff = lastOffset - currentOffset;
+            occurrenceStart.setMinutes(occurrenceStart.getMinutes() + offsetDiff);
+            occurrenceEnd.setMinutes(occurrenceEnd.getMinutes() + offsetDiff);
+            lastOffset = currentOffset;
+          }
+          nextEventTzTransition = tzManager.getNextTransition(eventTimezone, currentMs, rangeEndMs);
+        }
+
+        if (!hasExceptions || !this.isException(occurrenceStart, rule, event.id)) {
+          occurrences.push({
+            start: occurrenceStart,
+            end: occurrenceEnd,
+            recurringEventId: event.id,
+            timezone: eventTimezone,
+            originalStart: event.start
+          });
+        }
+      }
+
+      // Advance: pure addition unless the step crosses a system-timezone
+      // transition, where Date arithmetic reproduces wall-clock semantics
+      const days = dayDeltas ? dayDeltas[weekday] : stepDays;
+      if (dayDeltas) {
+        weekday = (weekday + days) % 7;
+      }
+      const naiveMs = currentMs + days * DAY;
+      if (naiveMs >= nextSystemTransition) {
+        const cursor = new Date(currentMs);
+        cursor.setDate(cursor.getDate() + days);
+        currentMs = cursor.getTime();
+        nextSystemTransition = this._nextSystemTransition(currentMs, rangeEndMs);
+      } else {
+        currentMs = naiveMs;
+      }
+      count++;
+
+      if (rule.count && count >= rule.count) {
+        break;
+      }
     }
 
     return occurrences;
+  }
+
+  /**
+   * Find the next system-timezone offset transition after fromMs.
+   * Cached module-wide: the system timezone is fixed for the process.
+   * @param {number} fromMs - Search from this timestamp (exclusive)
+   * @param {number} toMs - Extend cache coverage at least this far
+   * @returns {number} Transition timestamp, or Infinity if none within coverage
+   * @private
+   */
+  static _nextSystemTransition(fromMs, toMs) {
+    if (fromMs >= toMs) {
+      return Infinity;
+    }
+    let cache = this._systemTransitions;
+    if (!cache || fromMs < cache.from || toMs > cache.to) {
+      const from = Math.min(fromMs, cache ? cache.from : fromMs);
+      const to = Math.max(toMs, cache ? cache.to : toMs);
+      cache = { from, to, transitions: this._scanSystemTransitions(from, to) };
+      this._systemTransitions = cache;
+    }
+    for (const t of cache.transitions) {
+      if (t > fromMs) {
+        return t;
+      }
+    }
+    return Infinity;
+  }
+
+  /**
+   * Scan for system-timezone offset transitions via Date#getTimezoneOffset.
+   * Probes weekly (shorter than any real-world gap between transitions)
+   * and binary-searches each change to the exact millisecond.
+   * @private
+   */
+  static _scanSystemTransitions(fromMs, toMs) {
+    const WEEK = 7 * 86400000;
+    const transitions = [];
+    let lo = fromMs;
+    let loOffset = new Date(lo).getTimezoneOffset();
+    while (lo < toMs) {
+      const hi = Math.min(lo + WEEK, toMs);
+      const hiOffset = new Date(hi).getTimezoneOffset();
+      if (hiOffset !== loOffset) {
+        let a = lo;
+        let b = hi;
+        while (b - a > 1) {
+          const mid = Math.floor((a + b) / 2);
+          if (new Date(mid).getTimezoneOffset() === loOffset) {
+            a = mid;
+          } else {
+            b = mid;
+          }
+        }
+        transitions.push(b);
+        loOffset = hiOffset;
+      }
+      lo = hi;
+    }
+    return transitions;
   }
 
   /**
