@@ -5,7 +5,7 @@
 export class StateManager {
   /**
    * Create a new StateManager instance
-   * @param {Partial<import('../../types.js').CalendarState>} [initialState={}] - Initial state values
+   * @param {Partial<import('../types.js').CalendarState>} [initialState={}] - Initial state values
    */
   constructor(initialState = {}) {
     this.state = {
@@ -75,7 +75,7 @@ export class StateManager {
 
   /**
    * Get the current state
-   * @returns {import('../../types.js').CalendarState} Current state (frozen)
+   * @returns {import('../types.js').CalendarState} Current state (frozen)
    */
   getState() {
     return Object.freeze({ ...this.state });
@@ -83,7 +83,7 @@ export class StateManager {
 
   /**
    * Get a specific state value
-   * @param {keyof import('../../types.js').CalendarState} key - The state key
+   * @param {keyof import('../types.js').CalendarState} key - The state key
    * @returns {any} The state value
    */
   get(key) {

@@ -45,3 +45,4 @@ demo/dist/*.js*
 demo/dist/*.html
 demo/dist/css/
 .env*.local
+types/

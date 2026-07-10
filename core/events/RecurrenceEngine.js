@@ -24,7 +24,7 @@ export class RecurrenceEngine {
    * @param {Date} rangeEnd - End of the expansion range
    * @param {number} [maxOccurrences=365] - Maximum number of occurrences to generate
    * @param {string} [timezone] - Timezone for expansion (important for DST)
-   * @returns {import('../../types.js').EventOccurrence[]} Array of occurrence objects with start/end dates
+   * @returns {import('../types.js').EventOccurrence[]} Array of occurrence objects with start/end dates
    */
   static expandEvent(event, rangeStart, rangeEnd, maxOccurrences = 365, timezone = null) {
     // Enforce hard limit regardless of caller-provided value
@@ -165,8 +165,8 @@ export class RecurrenceEngine {
 
   /**
    * Parse an RRULE string into a rule object
-   * @param {string|import('../../types.js').RecurrenceRule} ruleString - RRULE string (e.g., "FREQ=DAILY;INTERVAL=1;COUNT=10") or rule object
-   * @returns {import('../../types.js').RecurrenceRule} Parsed rule object
+   * @param {string|import('../types.js').RecurrenceRule} ruleString - RRULE string (e.g., "FREQ=DAILY;INTERVAL=1;COUNT=10") or rule object
+   * @returns {import('../types.js').RecurrenceRule} Parsed rule object
    */
   static parseRule(ruleString) {
     // Use the new comprehensive parser
@@ -177,7 +177,7 @@ export class RecurrenceEngine {
    * Parse a rule with caching for string rules (internal use by expandEvent).
    * Cached rule objects are shared across calls and must not be mutated.
    * @param {string|Object} recurrenceRule - RRULE string or rule object
-   * @returns {import('../../types.js').RecurrenceRule} Parsed rule object
+   * @returns {import('../types.js').RecurrenceRule} Parsed rule object
    * @private
    */
   static _getParsedRule(recurrenceRule) {

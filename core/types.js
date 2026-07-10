@@ -19,6 +19,9 @@
  * @property {boolean} [recurring=false] - Whether this is a recurring event
  * @property {RecurrenceRule|string} [recurrenceRule=null] - Recurrence rule (RRULE string or object)
  * @property {string} [timeZone=null] - IANA timezone for the event
+ * @property {string} [endTimeZone=null] - IANA timezone for the event end (cross-timezone events)
+ * @property {RecurrenceRule|string} [recurrence=null] - Backward-compatible alias for recurrenceRule
+ * @property {string} [category=null] - Single category (alias for a one-element categories array)
  * @property {EventStatus} [status='confirmed'] - Event status
  * @property {EventVisibility} [visibility='public'] - Event visibility
  * @property {Organizer} [organizer=null] - Event organizer
@@ -172,7 +175,7 @@
  * @property {boolean} isCurrentMonth - Whether this day is in the current month
  * @property {boolean} isToday - Whether this is today
  * @property {boolean} isWeekend - Whether this is a weekend day
- * @property {import('./core/events/Event.js').Event[]} events - Events for this day
+ * @property {import('./events/Event.js').Event[]} events - Events for this day
  */
 
 /**
@@ -191,9 +194,9 @@
  * @property {string} dayName - Localized day name
  * @property {boolean} isToday - Whether this is today
  * @property {boolean} isWeekend - Whether this is a weekend day
- * @property {import('./core/events/Event.js').Event[]} events - All events for this day
- * @property {Array<import('./core/events/Event.js').Event[]>} overlapGroups - Groups of overlapping events
- * @property {function(import('./core/events/Event.js').Event[]): Map<string, EventPosition>} getEventPositions - Function to calculate positions
+ * @property {import('./events/Event.js').Event[]} events - All events for this day
+ * @property {Array<import('./events/Event.js').Event[]>} overlapGroups - Groups of overlapping events
+ * @property {(events: import('./events/Event.js').Event[]) => Map<string, EventPosition>} getEventPositions - Function to calculate positions
  */
 
 /**
@@ -208,7 +211,7 @@
  * @property {Date} date - Date being displayed
  * @property {string} dayName - Localized day name
  * @property {boolean} isToday - Whether this is today
- * @property {import('./core/events/Event.js').Event[]} allDayEvents - All-day events
+ * @property {import('./events/Event.js').Event[]} allDayEvents - All-day events
  * @property {HourSlot[]} hours - Hourly time slots
  */
 
@@ -216,7 +219,7 @@
  * @typedef {Object} HourSlot
  * @property {number} hour - Hour (0-23)
  * @property {string} time - Formatted time string
- * @property {import('./core/events/Event.js').Event[]} events - Events in this hour
+ * @property {import('./events/Event.js').Event[]} events - Events in this hour
  */
 
 /**
@@ -233,7 +236,7 @@
  * @property {Date} date - Date object
  * @property {string} dayName - Localized day name
  * @property {boolean} isToday - Whether this is today
- * @property {import('./core/events/Event.js').Event[]} events - Events for this day
+ * @property {import('./events/Event.js').Event[]} events - Events for this day
  */
 
 /**
@@ -273,9 +276,9 @@
 /**
  * @typedef {Object} EventStoreChange
  * @property {('add'|'update'|'remove'|'clear')} type - Type of change
- * @property {import('./core/events/Event.js').Event} [event] - Affected event
- * @property {import('./core/events/Event.js').Event} [oldEvent] - Previous event state (for updates)
- * @property {import('./core/events/Event.js').Event[]} [oldEvents] - Previous events (for clear)
+ * @property {import('./events/Event.js').Event} [event] - Affected event
+ * @property {import('./events/Event.js').Event} [oldEvent] - Previous event state (for updates)
+ * @property {import('./events/Event.js').Event[]} [oldEvents] - Previous events (for clear)
  * @property {number} version - Store version number
  */
 
@@ -305,16 +308,16 @@
 
 /**
  * @typedef {Object} CalendarPlugin
- * @property {function(import('./core/calendar/Calendar.js').Calendar): void} install - Installation function
- * @property {function(import('./core/calendar/Calendar.js').Calendar): void} [uninstall] - Cleanup function
+ * @property {(calendar: import('./calendar/Calendar.js').Calendar) => void} install - Installation function
+ * @property {(calendar: import('./calendar/Calendar.js').Calendar) => void} [uninstall] - Cleanup function
  */
 
 /**
- * @typedef {function(any): void} EventListener
+ * @typedef {(payload: any) => void} EventListener
  */
 
 /**
- * @typedef {function(): void} UnsubscribeFn
+ * @typedef {() => void} UnsubscribeFn
  */
 
 /**

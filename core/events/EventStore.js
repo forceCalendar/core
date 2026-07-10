@@ -56,13 +56,13 @@ export class EventStore {
     // Change tracking
     /** @type {number} */
     this.version = 0;
-    /** @type {Set<import('../../types.js').EventListener>} */
+    /** @type {Set<import('../types.js').EventListener>} */
     this.listeners = new Set();
   }
 
   /**
    * Add an event to the store
-   * @param {Event|import('../../types.js').EventData} event - The event to add
+   * @param {Event|import('../types.js').EventData} event - The event to add
    * @returns {Event} The added event
    * @throws {Error} If event with same ID already exists
    */
@@ -107,7 +107,7 @@ export class EventStore {
   /**
    * Update an existing event
    * @param {string} eventId - The event ID
-   * @param {Partial<import('../../types.js').EventData>} updates - Properties to update
+   * @param {Partial<import('../types.js').EventData>} updates - Properties to update
    * @returns {Event} The updated event
    * @throws {Error} If event not found
    */
@@ -212,7 +212,7 @@ export class EventStore {
 
   /**
    * Query events with filters
-   * @param {import('../../types.js').QueryFilters} [filters={}] - Query filters
+   * @param {import('../types.js').QueryFilters} [filters={}] - Query filters
    * @returns {Event[]} Filtered events
    */
   queryEvents(filters = {}) {
@@ -1117,7 +1117,7 @@ export class EventStore {
 
   /**
    * Add multiple events in batch
-   * @param {Array<Event|import('../../types.js').EventData>} events - Events to add
+   * @param {Array<Event|import('../types.js').EventData>} events - Events to add
    * @returns {Event[]} Added events
    */
   addEvents(events) {
@@ -1277,9 +1277,9 @@ export class EventStore {
 
   /**
    * Check for conflicts for an event
-   * @param {Event|import('../../types.js').EventData} event - Event to check
-   * @param {import('../../types.js').ConflictCheckOptions} [options={}] - Check options
-   * @returns {import('../../types.js').ConflictSummary} Conflict summary
+   * @param {Event|import('../types.js').EventData} event - Event to check
+   * @param {import('../types.js').ConflictCheckOptions} [options={}] - Check options
+   * @returns {import('../types.js').ConflictSummary} Conflict summary
    */
   checkConflicts(event, options = {}) {
     return this.conflictDetector.checkConflicts(event, options);
@@ -1289,8 +1289,8 @@ export class EventStore {
    * Check conflicts between two events
    * @param {string} eventId1 - First event ID
    * @param {string} eventId2 - Second event ID
-   * @param {import('../../types.js').ConflictCheckOptions} [options={}] - Check options
-   * @returns {import('../../types.js').ConflictDetails[]} Conflicts between events
+   * @param {import('../types.js').ConflictCheckOptions} [options={}] - Check options
+   * @returns {import('../types.js').ConflictDetails[]} Conflicts between events
    */
   checkEventPairConflicts(eventId1, eventId2, options = {}) {
     const event1 = this.getEvent(eventId1);
@@ -1307,8 +1307,8 @@ export class EventStore {
    * Get all conflicts in a date range
    * @param {Date} start - Start date
    * @param {Date} end - End date
-   * @param {import('../../types.js').ConflictCheckOptions} [options={}] - Check options
-   * @returns {import('../../types.js').ConflictSummary} All conflicts in range
+   * @param {import('../types.js').ConflictCheckOptions} [options={}] - Check options
+   * @returns {import('../types.js').ConflictSummary} All conflicts in range
    */
   getAllConflicts(start, end, options = {}) {
     const events = this.getEventsInRange(start, end, false);
@@ -1363,9 +1363,9 @@ export class EventStore {
 
   /**
    * Add event with conflict checking
-   * @param {Event|import('../../types.js').EventData} event - Event to add
+   * @param {Event|import('../types.js').EventData} event - Event to add
    * @param {boolean} [allowConflicts=true] - Whether to allow adding with conflicts
-   * @returns {{event: Event, conflicts: import('../../types.js').ConflictSummary}} Result
+   * @returns {{event: Event, conflicts: import('../types.js').ConflictSummary}} Result
    */
   addEventWithConflictCheck(event, allowConflicts = true) {
     // Check conflicts before adding
@@ -1387,7 +1387,7 @@ export class EventStore {
   /**
    * Find events with conflicts
    * @param {Object} [options={}] - Options
-   * @returns {Array<{event: Event, conflicts: import('../../types.js').ConflictDetails[]}>} Events with conflicts
+   * @returns {Array<{event: Event, conflicts: import('../types.js').ConflictDetails[]}>} Events with conflicts
    */
   findEventsWithConflicts(options = {}) {
     const eventsWithConflicts = [];

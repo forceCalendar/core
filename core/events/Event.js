@@ -18,8 +18,8 @@ export class Event {
 
   /**
    * Normalize event data
-   * @param {import('../../types.js').EventData} data - Raw event data
-   * @returns {import('../../types.js').EventData} Normalized event data
+   * @param {import('../types.js').EventData} data - Raw event data
+   * @returns {import('../types.js').EventData} Normalized event data
    */
   static normalize(data) {
     const normalized = { ...data };
@@ -109,7 +109,7 @@ export class Event {
 
   /**
    * Validate event data
-   * @param {import('../../types.js').EventData} data - Normalized event data
+   * @param {import('../types.js').EventData} data - Normalized event data
    * @throws {Error} If validation fails
    */
   static validate(data) {
@@ -189,7 +189,7 @@ export class Event {
 
   /**
    * Create a new Event instance
-   * @param {import('../../types.js').EventData} eventData - Event data object
+   * @param {import('../types.js').EventData} eventData - Event data object
    * @throws {Error} If required fields are missing or invalid
    */
   constructor({
@@ -426,7 +426,7 @@ export class Event {
 
   /**
    * Backward-compatible alias for recurrenceRule
-   * @returns {import('../../types.js').RecurrenceRule|string|null}
+   * @returns {import('../types.js').RecurrenceRule|string|null}
    */
   get recurrence() {
     return this.recurrenceRule;
@@ -513,7 +513,7 @@ export class Event {
 
   /**
    * Clone the event with optional updates
-   * @param {Partial<import('../../types.js').EventData>} [updates={}] - Properties to update in the clone
+   * @param {Partial<import('../types.js').EventData>} [updates={}] - Properties to update in the clone
    * @returns {Event} New Event instance with updated properties
    */
   clone(updates = {}) {
@@ -548,7 +548,7 @@ export class Event {
 
   /**
    * Convert event to plain object
-   * @returns {import('../../types.js').EventData} Plain object representation of the event
+   * @returns {import('../types.js').EventData} Plain object representation of the event
    */
   toObject() {
     return {
@@ -580,7 +580,7 @@ export class Event {
 
   /**
    * Create Event from plain object
-   * @param {import('../../types.js').EventData} obj - Plain object with event properties
+   * @param {import('../types.js').EventData} obj - Plain object with event properties
    * @returns {Event} New Event instance
    */
   static fromObject(obj) {
@@ -613,7 +613,7 @@ export class Event {
 
   /**
    * Add an attendee to the event
-   * @param {import('../../types.js').Attendee} attendee - Attendee to add
+   * @param {import('../types.js').Attendee} attendee - Attendee to add
    * @returns {boolean} True if attendee was added, false if already exists
    */
   addAttendee(attendee) {
@@ -662,7 +662,7 @@ export class Event {
   /**
    * Update an attendee's response status
    * @param {string} email - Attendee's email
-   * @param {import('../../types.js').AttendeeResponseStatus} responseStatus - New response status
+   * @param {import('../types.js').AttendeeResponseStatus} responseStatus - New response status
    * @returns {boolean} True if attendee was updated
    */
   updateAttendeeResponse(email, responseStatus) {
@@ -678,7 +678,7 @@ export class Event {
   /**
    * Get an attendee by email
    * @param {string} email - Attendee's email
-   * @returns {import('../../types.js').Attendee|null} The attendee or null
+   * @returns {import('../types.js').Attendee|null} The attendee or null
    */
   getAttendee(email) {
     return this.attendees.find(a => a.email === email) || null;
@@ -695,8 +695,8 @@ export class Event {
 
   /**
    * Get attendees by response status
-   * @param {import('../../types.js').AttendeeResponseStatus} status - Response status to filter by
-   * @returns {import('../../types.js').Attendee[]} Filtered attendees
+   * @param {import('../types.js').AttendeeResponseStatus} status - Response status to filter by
+   * @returns {import('../types.js').Attendee[]} Filtered attendees
    */
   getAttendeesByStatus(status) {
     return this.attendees.filter(a => a.responseStatus === status);
@@ -718,7 +718,7 @@ export class Event {
 
   /**
    * Add a reminder to the event
-   * @param {import('../../types.js').Reminder} reminder - Reminder to add
+   * @param {import('../types.js').Reminder} reminder - Reminder to add
    * @returns {boolean} True if reminder was added
    */
   addReminder(reminder) {
@@ -764,7 +764,7 @@ export class Event {
 
   /**
    * Get active reminders
-   * @returns {import('../../types.js').Reminder[]} Active reminders
+   * @returns {import('../types.js').Reminder[]} Active reminders
    */
   getActiveReminders() {
     return this.reminders.filter(r => r.enabled !== false);

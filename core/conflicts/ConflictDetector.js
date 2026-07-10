@@ -14,9 +14,9 @@ export class ConflictDetector {
 
   /**
    * Check for conflicts for a specific event
-   * @param {import('../events/Event.js').Event|import('../../types.js').EventData} event - Event to check
-   * @param {import('../../types.js').ConflictCheckOptions} [options={}] - Check options
-   * @returns {import('../../types.js').ConflictSummary} Conflict summary
+   * @param {import('../events/Event.js').Event|import('../types.js').EventData} event - Event to check
+   * @param {import('../types.js').ConflictCheckOptions} [options={}] - Check options
+   * @returns {import('../types.js').ConflictSummary} Conflict summary
    */
   checkConflicts(event, options = {}) {
     // Default options
@@ -87,8 +87,8 @@ export class ConflictDetector {
    * Check for conflicts between two specific events
    * @param {import('../events/Event.js').Event} event1 - First event
    * @param {import('../events/Event.js').Event} event2 - Second event
-   * @param {import('../../types.js').ConflictCheckOptions} [options={}] - Check options
-   * @returns {import('../../types.js').ConflictDetails[]} Array of conflicts
+   * @param {import('../types.js').ConflictCheckOptions} [options={}] - Check options
+   * @returns {import('../types.js').ConflictDetails[]} Array of conflicts
    */
   checkEventPairConflicts(event1, event2, options = {}) {
     const opts = {

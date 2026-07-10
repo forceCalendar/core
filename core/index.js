@@ -24,6 +24,10 @@ export { RecurrenceEngine } from './events/RecurrenceEngine.js';
 export { RecurrenceEngineV2 } from './events/RecurrenceEngineV2.js';
 export { RRuleParser } from './events/RRuleParser.js';
 
+// Timezone and Conflicts
+export { TimezoneManager } from './timezone/TimezoneManager.js';
+export { ConflictDetector } from './conflicts/ConflictDetector.js';
+
 // Enhanced Integration
 export { EnhancedCalendar } from './integration/EnhancedCalendar.js';
 

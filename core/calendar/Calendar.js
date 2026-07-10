@@ -12,7 +12,7 @@ import { TimezoneManager } from '../timezone/TimezoneManager.js';
 export class Calendar {
   /**
    * Create a new Calendar instance
-   * @param {import('../../types.js').CalendarConfig} [config={}] - Configuration options
+   * @param {import('../types.js').CalendarConfig} [config={}] - Configuration options
    */
   constructor(config = {}) {
     // Initialize timezone manager first (use singleton to share cache)
@@ -69,7 +69,7 @@ export class Calendar {
 
   /**
    * Set the calendar view
-   * @param {import('../../types.js').ViewType} viewType - The view type ('month', 'week', 'day', 'list')
+   * @param {import('../types.js').ViewType} viewType - The view type ('month', 'week', 'day', 'list')
    * @param {Date} [date=null] - Optional date to navigate to
    */
   setView(viewType, date = null) {
@@ -87,7 +87,7 @@ export class Calendar {
 
   /**
    * Get the current view type
-   * @returns {import('../../types.js').ViewType} The current view type
+   * @returns {import('../types.js').ViewType} The current view type
    */
   getView() {
     return this.state.get('view');
@@ -160,7 +160,7 @@ export class Calendar {
 
   /**
    * Add an event
-   * @param {import('../events/Event.js').Event|import('../../types.js').EventData} eventData - Event data or Event instance
+   * @param {import('../events/Event.js').Event|import('../types.js').EventData} eventData - Event data or Event instance
    * @returns {import('../events/Event.js').Event} The added event
    */
   addEvent(eventData) {
@@ -389,7 +389,7 @@ export class Calendar {
 
   /**
    * Get the current view's data
-   * @returns {import('../../types.js').MonthViewData|import('../../types.js').WeekViewData|import('../../types.js').DayViewData|import('../../types.js').ListViewData|null} View-specific data
+   * @returns {import('../types.js').MonthViewData|import('../types.js').WeekViewData|import('../types.js').DayViewData|import('../types.js').ListViewData|null} View-specific data
    */
   getViewData() {
     const view = this.state.get('view');

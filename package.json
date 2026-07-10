@@ -6,7 +6,7 @@
   "description": "A modern, lightweight, framework-agnostic calendar engine optimized for Salesforce",
   "main": "core/index.js",
   "module": "core/index.js",
-  "types": "core/types.js",
+  "types": "./types/index.d.ts",
   "sideEffects": false,
   "scripts": {
     "test": "node tests/run-all.js",
@@ -17,16 +17,39 @@
     "format": "prettier --write \"core/**/*.js\"",
     "format:check": "prettier --check \"core/**/*.js\"",
     "quality": "npm run lint && npm run format:check",
-    "sync:version": "node scripts/sync-version.js"
+    "sync:version": "node scripts/sync-version.js",
+    "build:types": "tsc -p tsconfig.types.json",
+    "prepublishOnly": "npm run build:types"
   },
   "exports": {
-    ".": "./core/index.js",
-    "./calendar": "./core/calendar/Calendar.js",
-    "./events": "./core/events/Event.js",
-    "./state": "./core/state/StateManager.js",
-    "./search": "./core/search/EventSearch.js",
-    "./ics": "./core/ics/ICSHandler.js",
-    "./types": "./core/types.js"
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./core/index.js"
+    },
+    "./calendar": {
+      "types": "./types/calendar/Calendar.d.ts",
+      "default": "./core/calendar/Calendar.js"
+    },
+    "./events": {
+      "types": "./types/events/Event.d.ts",
+      "default": "./core/events/Event.js"
+    },
+    "./state": {
+      "types": "./types/state/StateManager.d.ts",
+      "default": "./core/state/StateManager.js"
+    },
+    "./search": {
+      "types": "./types/search/EventSearch.d.ts",
+      "default": "./core/search/EventSearch.js"
+    },
+    "./ics": {
+      "types": "./types/ics/ICSHandler.d.ts",
+      "default": "./core/ics/ICSHandler.js"
+    },
+    "./types": {
+      "types": "./types/types.d.ts",
+      "default": "./core/types.js"
+    }
   },
   "repository": {
     "type": "git",
@@ -53,12 +76,14 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.6.0",
     "globals": "^17.7.0",
-    "prettier": "^3.0.3"
+    "prettier": "^3.0.3",
+    "typescript": "^7.0.2"
   },
   "files": [
     "core/**/*.js",
     "!core/**/*.test.js",
     "!core/**/*.spec.js",
+    "types/**/*.d.ts",
     "README.md",
     "LICENSE"
   ]
