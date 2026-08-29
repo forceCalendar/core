@@ -275,11 +275,53 @@
 
 /**
  * @typedef {Object} EventStoreChange
- * @property {('add'|'update'|'remove'|'clear')} type - Type of change
+ * @property {('add'|'update'|'remove'|'clear'|'batch')} type - Type of change
  * @property {import('./events/Event.js').Event} [event] - Affected event
  * @property {import('./events/Event.js').Event} [oldEvent] - Previous event state (for updates)
  * @property {import('./events/Event.js').Event[]} [oldEvents] - Previous events (for clear)
+ * @property {EventStoreChange[]} [changes] - Individual changes (for batch)
+ * @property {number} [count] - Number of individual changes (for batch)
  * @property {number} version - Store version number
+ */
+
+/**
+ * @typedef {(a: import('./events/Event.js').Event, b: import('./events/Event.js').Event) => boolean} EventEquivalenceFn
+ */
+
+/**
+ * @typedef {Object} ReconcileOptions
+ * @property {boolean} [removeMissing=true] - Remove stored events that are absent from the snapshot
+ * @property {EventEquivalenceFn} [isEquivalent] - Comparator deciding whether a stored event is unchanged (defaults to Event.isEquivalent)
+ */
+
+/**
+ * @typedef {Object} ReconciledUpdate
+ * @property {import('./events/Event.js').Event} event - Event now in the store
+ * @property {import('./events/Event.js').Event} oldEvent - Event it replaced
+ */
+
+/**
+ * @typedef {Object} ReconcileResult
+ * @property {import('./events/Event.js').Event[]} added - Events that were not in the store before
+ * @property {ReconciledUpdate[]} updated - Events whose data changed
+ * @property {import('./events/Event.js').Event[]} removed - Events removed from the store
+ * @property {import('./events/Event.js').Event[]} unchanged - Stored events left untouched (same instances)
+ */
+
+/**
+ * @typedef {Object} SetEventsOptions
+ * @property {boolean} [reconcile=false] - Apply only the differences instead of clearing and re-adding
+ * @property {boolean} [removeMissing=true] - Reconcile only: remove stored events absent from the snapshot
+ * @property {EventEquivalenceFn} [isEquivalent] - Reconcile only: custom equivalence comparator
+ */
+
+/**
+ * @typedef {Object} EventsSetPayload
+ * @property {import('./events/Event.js').Event[]} events - All events after the operation
+ * @property {import('./events/Event.js').Event[]} added - Events added by the operation
+ * @property {ReconciledUpdate[]} updated - Events replaced by the operation
+ * @property {import('./events/Event.js').Event[]} removed - Events removed by the operation
+ * @property {import('./events/Event.js').Event[]} unchanged - Events left untouched
  */
 
 /**

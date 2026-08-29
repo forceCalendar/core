@@ -6,6 +6,42 @@
 
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
 
+/**
+ * Structural equality for plain event sub-values (attendees, metadata, rules...).
+ * Handles primitives, Dates, arrays (order-sensitive) and plain objects
+ * (key-order insensitive). Functions and symbols never compare equal unless
+ * they are the same reference.
+ * @param {*} a
+ * @param {*} b
+ * @returns {boolean}
+ */
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== 'object' || typeof b !== 'object') {
+    // NaN is the only primitive that is not === itself
+    return Number.isNaN(a) && Number.isNaN(b);
+  }
+  if (a instanceof Date || b instanceof Date) {
+    return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const keysA = Object.keys(a).filter(k => a[k] !== undefined);
+  const keysB = Object.keys(b).filter(k => b[k] !== undefined);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!deepEqual(a[key], b[key])) return false;
+  }
+  return true;
+}
+
 export class Event {
   // Field size limits
   static FIELD_LIMITS = {
@@ -607,6 +643,82 @@ export class Event {
       this.recurrenceRule === other.recurrenceRule &&
       this.status === other.status
     );
+  }
+
+  /**
+   * Fields compared by {@link Event.isEquivalent}, in comparison order.
+   * Scalars are compared with strict equality, dates by timestamp and
+   * structured fields (recurrence rule, organizer, attendees, reminders,
+   * categories, attachments, conference data, metadata) structurally.
+   * @type {ReadonlyArray<string>}
+   */
+  static EQUIVALENCE_FIELDS = Object.freeze([
+    'id',
+    'title',
+    'start',
+    'end',
+    'allDay',
+    'timeZone',
+    'endTimeZone',
+    'description',
+    'location',
+    'color',
+    'backgroundColor',
+    'borderColor',
+    'textColor',
+    'recurring',
+    'recurrenceRule',
+    'status',
+    'visibility',
+    'organizer',
+    'attendees',
+    'reminders',
+    'categories',
+    'attachments',
+    'conferenceData',
+    'metadata'
+  ]);
+
+  /**
+   * Deep equivalence check over the full event data surface.
+   *
+   * Unlike {@link Event#equals} (which only looks at identity, title, dates,
+   * description, location, recurrence and status) this compares every field
+   * that can be supplied through {@link EventData}: timezones, all-day flag,
+   * colours, visibility, organizer, attendees, reminders, categories,
+   * attachments, conference data and metadata. Dates are compared by
+   * timestamp; structured fields are compared structurally (arrays are
+   * order-sensitive, object key order is ignored). Plain event data objects
+   * are normalized through the {@link Event} constructor before comparison so
+   * that `{ color: 'red' }` and `{ backgroundColor: 'red', borderColor: 'red' }`
+   * describe the same event. Two events with different ids are never
+   * equivalent.
+   *
+   * This is the default comparator used by `EventStore.reconcile()` to decide
+   * whether an incoming snapshot entry replaces the stored event.
+   *
+   * @example
+   * Event.isEquivalent(stored, { ...stored.toObject(), backgroundColor: '#f00' }); // false
+   * Event.isEquivalent(stored, stored.clone()); // true
+   *
+   * @param {Event|import('../types.js').EventData} a - First event or raw event data
+   * @param {Event|import('../types.js').EventData} b - Second event or raw event data
+   * @returns {boolean} True when both describe the same event data
+   * @throws {Error} If raw event data fails {@link Event.validate}
+   */
+  static isEquivalent(a, b) {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+
+    const left = a instanceof Event ? a : new Event(a);
+    const right = b instanceof Event ? b : new Event(b);
+
+    for (const field of Event.EQUIVALENCE_FIELDS) {
+      if (!deepEqual(left[field], right[field])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // ============ Attendee Management Methods ============

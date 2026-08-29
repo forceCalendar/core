@@ -235,11 +235,103 @@ export class Calendar {
 
   /**
    * Set all events (replaces existing)
-   * @param {Event[]} events - Array of events
+   *
+   * By default this clears the store and re-adds every entry, so every stored
+   * {@link Event} instance is replaced. Pass `{ reconcile: true }` to apply only
+   * the differences instead (see {@link Calendar#reconcileEvents}).
+   *
+   * Emits a single `eventsSet` event whose payload lists the resulting
+   * `events` plus the `added`, `updated`, `removed` and `unchanged` sets, so
+   * listeners can tell a snapshot load apart from user mutations (no
+   * `eventAdd`/`eventUpdate`/`eventRemove` events are emitted).
+   *
+   * @example
+   * calendar.on('eventsSet', ({ added, updated, removed }) => {
+   *   if (added.length || updated.length || removed.length) render();
+   * });
+   * calendar.setEvents(snapshot, { reconcile: true });
+   *
+   * @param {Array<import('../events/Event.js').Event|import('../types.js').EventData>} events - Array of events
+   * @param {import('../types.js').SetEventsOptions} [options={}] - Load options
+   * @returns {import('../types.js').EventsSetPayload} The applied change set
    */
-  setEvents(events) {
+  setEvents(events, options = {}) {
+    if (options.reconcile) {
+      return this.reconcileEvents(events, options);
+    }
+
+    const removed = this.getEvents();
     this.eventStore.loadEvents(events);
-    this._emit('eventsSet', { events: this.getEvents() });
+    const added = this.getEvents();
+
+    /** @type {import('../types.js').EventsSetPayload} */
+    const payload = { events: added, added, updated: [], removed, unchanged: [] };
+    this._emit('eventsSet', payload);
+    return payload;
+  }
+
+  /**
+   * Reconcile the calendar with a snapshot of events, applying only the differences.
+   *
+   * Intended for consumers that receive periodic full snapshots (polling a
+   * server, a reactive `events` prop). Unchanged events keep their existing
+   * {@link Event} instance, changed ones are replaced, new ones are added and
+   * events missing from the snapshot are removed (unless
+   * `removeMissing: false`). Equivalence is decided by
+   * {@link Event.isEquivalent} unless an `isEquivalent` comparator is supplied.
+   * Plain event data without a `timeZone` defaults to the calendar timezone,
+   * exactly as with {@link Calendar#addEvent}.
+   *
+   * The store emits one `eventStoreChange` of type `batch` (or none when
+   * nothing differs) and the calendar emits a single `eventsSet` event
+   * carrying the change set. Per-event `eventAdd`/`eventUpdate`/`eventRemove`
+   * events are not emitted, so listeners that forward those to a backend are
+   * not triggered by a snapshot load.
+   *
+   * @example
+   * const { added, updated, removed, unchanged } = calendar.reconcileEvents(rows);
+   * updated.forEach(({ event, oldEvent }) => console.log(oldEvent.title, '->', event.title));
+   *
+   * @param {Array<import('../events/Event.js').Event|import('../types.js').EventData>} events - Complete snapshot of events
+   * @param {import('../types.js').ReconcileOptions} [options={}] - Reconcile options
+   * @returns {import('../types.js').EventsSetPayload} Resulting events and the applied change set
+   * @throws {Error} If an entry fails validation or two entries share an id
+   */
+  reconcileEvents(events, options = {}) {
+    const { removeMissing, isEquivalent } = options;
+    const prepared = [];
+    for (const eventData of events) {
+      if (!(eventData instanceof Event) && eventData && !eventData.timeZone) {
+        prepared.push({ ...eventData, timeZone: this.config.timeZone });
+      } else {
+        prepared.push(eventData);
+      }
+    }
+
+    const storeOptions = {};
+    if (removeMissing !== undefined) storeOptions.removeMissing = removeMissing;
+    if (isEquivalent !== undefined) storeOptions.isEquivalent = isEquivalent;
+
+    const result = this.eventStore.reconcile(prepared, storeOptions);
+
+    /** @type {import('../types.js').EventsSetPayload} */
+    const payload = { events: this.getEvents(), ...result };
+    this._emit('eventsSet', payload);
+    return payload;
+  }
+
+  /**
+   * Get the event store's change counter
+   *
+   * The counter increases with every add/update/remove/clear and every
+   * committed batch, so comparing two readings is a cheap way to find out
+   * whether {@link Calendar#setEvents} or {@link Calendar#reconcileEvents}
+   * changed anything.
+   *
+   * @returns {number} Current store version
+   */
+  getEventsVersion() {
+    return this.eventStore.version;
   }
 
   /**

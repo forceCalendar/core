@@ -86,19 +86,11 @@ export class EventStore {
       this._indexEvent(event);
 
       // Notify listeners (batch if in batch mode)
-      if (this.isBatchMode) {
-        this.batchNotifications.push({
-          type: 'add',
-          event,
-          version: ++this.version
-        });
-      } else {
-        this._notifyChange({
-          type: 'add',
-          event,
-          version: ++this.version
-        });
-      }
+      this._queueChange({
+        type: 'add',
+        event,
+        version: ++this.version
+      });
 
       return event;
     });
@@ -117,24 +109,10 @@ export class EventStore {
       throw new Error(`Event with id ${eventId} not found`);
     }
 
-    // Remove old indices
-    this._unindexEvent(existingEvent);
-
     // Create updated event
     const updatedEvent = existingEvent.clone(updates);
 
-    // Store updated event
-    this.events.set(eventId, updatedEvent);
-
-    // Update cache with new event data
-    this.optimizer.cache(eventId, updatedEvent, 'event');
-
-    // Clear query and date range caches since results may have changed
-    this.optimizer.queryCache.clear();
-    this.optimizer.dateRangeCache.clear();
-
-    // Re-index
-    this._indexEvent(updatedEvent);
+    this._replaceEvent(existingEvent, updatedEvent);
 
     // Notify listeners
     this._notifyChange({
@@ -148,6 +126,31 @@ export class EventStore {
   }
 
   /**
+   * Swap a stored event for a new instance with the same id, keeping
+   * indices and caches in sync. Does not notify listeners.
+   * @param {Event} existingEvent - Event currently in the store
+   * @param {Event} replacement - Event instance that takes its place
+   * @private
+   */
+  _replaceEvent(existingEvent, replacement) {
+    // Remove old indices
+    this._unindexEvent(existingEvent);
+
+    // Store replacement
+    this.events.set(replacement.id, replacement);
+
+    // Update cache with new event data
+    this.optimizer.cache(replacement.id, replacement, 'event');
+
+    // Clear query and date range caches since results may have changed
+    this.optimizer.queryCache.clear();
+    this.optimizer.dateRangeCache.clear();
+
+    // Re-index
+    this._indexEvent(replacement);
+  }
+
+  /**
    * Remove an event from the store
    * @param {string} eventId - The event ID to remove
    * @returns {boolean} True if removed, false if not found
@@ -158,16 +161,7 @@ export class EventStore {
       return false;
     }
 
-    // Remove from primary storage
-    this.events.delete(eventId);
-
-    // Invalidate caches
-    this.optimizer.eventCache.delete(eventId);
-    this.optimizer.queryCache.clear();
-    this.optimizer.dateRangeCache.clear();
-
-    // Remove from indices
-    this._unindexEvent(event);
+    this._detachEvent(event);
 
     // Notify listeners
     this._notifyChange({
@@ -177,6 +171,24 @@ export class EventStore {
     });
 
     return true;
+  }
+
+  /**
+   * Remove an event from storage, caches and indices. Does not notify listeners.
+   * @param {Event} event - Event currently in the store
+   * @private
+   */
+  _detachEvent(event) {
+    // Remove from primary storage
+    this.events.delete(event.id);
+
+    // Invalidate caches
+    this.optimizer.eventCache.delete(event.id);
+    this.optimizer.queryCache.clear();
+    this.optimizer.dateRangeCache.clear();
+
+    // Remove from indices
+    this._unindexEvent(event);
   }
 
   /**
@@ -706,6 +718,118 @@ export class EventStore {
   }
 
   /**
+   * Reconcile the store with a snapshot of events, applying only the differences.
+   *
+   * Compared with {@link EventStore#loadEvents} (clear + re-add everything) this:
+   * - keeps the existing {@link Event} instance for every entry that is
+   *   equivalent to the stored one (identity is preserved, no notification),
+   * - replaces stored events whose incoming data differs (`update` change),
+   * - adds events whose id is not in the store (`add` change),
+   * - removes stored events missing from the snapshot (`remove` change),
+   *   unless `removeMissing` is `false`,
+   * - emits a single `batch` notification listing those changes, or nothing at
+   *   all when the snapshot matches the store. When called while a batch is
+   *   already open the changes are queued on that batch instead.
+   *
+   * Input is validated up front: invalid event data or duplicate ids throw
+   * before the store is modified. Any error raised while applying the diff
+   * rolls the store back to its previous state.
+   *
+   * @example
+   * // periodic server snapshot
+   * const { added, updated, removed } = store.reconcile(rowsFromServer);
+   * if (added.length || updated.length || removed.length) rerender();
+   *
+   * @param {Array<Event|import('../types.js').EventData>} events - Complete snapshot of events
+   * @param {import('../types.js').ReconcileOptions} [options={}] - Reconcile options
+   * @returns {import('../types.js').ReconcileResult} Events that were added, updated, removed and left untouched
+   * @throws {Error} If an entry fails validation or two entries share an id
+   */
+  reconcile(events, options = {}) {
+    const { removeMissing = true, isEquivalent = Event.isEquivalent } = options;
+
+    if (!events || typeof events[Symbol.iterator] !== 'function') {
+      throw new Error('reconcile() expects an iterable of events');
+    }
+    if (typeof isEquivalent !== 'function') {
+      throw new Error('reconcile() option isEquivalent must be a function');
+    }
+
+    return this.optimizer.measure('reconcile', () => {
+      // Normalize and validate everything before touching the store
+      /** @type {Map<string, Event>} */
+      const incoming = new Map();
+      for (const eventData of events) {
+        const event = eventData instanceof Event ? eventData : new Event(eventData);
+        if (incoming.has(event.id)) {
+          throw new Error(`Duplicate event id in reconcile input: ${event.id}`);
+        }
+        incoming.set(event.id, event);
+      }
+
+      /** @type {import('../types.js').ReconcileResult} */
+      const result = { added: [], updated: [], removed: [], unchanged: [] };
+
+      // Nest inside an existing batch if one is open, otherwise own one
+      const ownsBatch = !this.isBatchMode;
+      if (ownsBatch) {
+        this.startBatch(true);
+      }
+
+      try {
+        if (removeMissing) {
+          for (const existing of Array.from(this.events.values())) {
+            if (!incoming.has(existing.id)) {
+              this._detachEvent(existing);
+              this._queueChange({ type: 'remove', event: existing, version: ++this.version });
+              result.removed.push(existing);
+            }
+          }
+        }
+
+        for (const event of incoming.values()) {
+          const existing = this.events.get(event.id);
+          if (!existing) {
+            this.events.set(event.id, event);
+            this.optimizer.cache(event.id, event, 'event');
+            this._indexEvent(event);
+            this._queueChange({ type: 'add', event, version: ++this.version });
+            result.added.push(event);
+          } else if (existing === event || isEquivalent(existing, event)) {
+            result.unchanged.push(existing);
+          } else {
+            this._replaceEvent(existing, event);
+            this._queueChange({
+              type: 'update',
+              event,
+              oldEvent: existing,
+              version: ++this.version
+            });
+            result.updated.push({ event, oldEvent: existing });
+          }
+        }
+
+        if (result.added.length > 0) {
+          // Newly indexed events may change range/query results
+          this.optimizer.queryCache.clear();
+          this.optimizer.dateRangeCache.clear();
+        }
+      } catch (error) {
+        if (ownsBatch) {
+          this.rollbackBatch();
+        }
+        throw error;
+      }
+
+      if (ownsBatch) {
+        this.commitBatch();
+      }
+
+      return result;
+    });
+  }
+
+  /**
    * Subscribe to store changes
    * @param {Function} callback - Callback function
    * @returns {Function} Unsubscribe function
@@ -949,6 +1073,19 @@ export class EventStore {
    * Notify listeners of changes
    * @private
    */
+  /**
+   * Deliver a change now, or queue it when a batch is open
+   * @param {import('../types.js').EventStoreChange} change - Change to deliver
+   * @private
+   */
+  _queueChange(change) {
+    if (this.isBatchMode) {
+      this.batchNotifications.push(change);
+    } else {
+      this._notifyChange(change);
+    }
+  }
+
   _notifyChange(change) {
     for (const listener of this.listeners) {
       try {
@@ -1066,7 +1203,7 @@ export class EventStore {
       this.batchBackup = null;
 
       // Clear cache
-      this.optimizer.clearCache();
+      this.clearCaches();
     }
 
     this.batchNotifications = [];
