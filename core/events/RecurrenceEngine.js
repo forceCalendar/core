@@ -12,6 +12,11 @@ export class RecurrenceEngine {
   // Hard limit to prevent resource exhaustion regardless of caller input
   static MAX_OCCURRENCES_HARD_LIMIT = 10000;
 
+  // Hard limit on expansion loop iterations (every occurrence stepped
+  // through, inside the range or not) so a rule that cannot be seeked
+  // arithmetically still terminates in bounded time
+  static MAX_ITERATIONS_HARD_LIMIT = 100000;
+
   // expandEvent is typically called many times with the same RRULE string
   // (every view render), so parsed rules are cached by their source string
   static _ruleCache = new Map();
@@ -19,10 +24,18 @@ export class RecurrenceEngine {
 
   /**
    * Expand a recurring event into individual occurrences
+   *
+   * Occurrences before rangeStart are skipped without being generated:
+   * daily, weekly and sub-daily rules seek straight to the range, so the
+   * cost of a query does not grow with the age of the series, and a series
+   * that started years before the queried window is still expanded.
+   *
    * @param {import('./Event.js').Event} event - The recurring event
    * @param {Date} rangeStart - Start of the expansion range
    * @param {Date} rangeEnd - End of the expansion range
-   * @param {number} [maxOccurrences=365] - Maximum number of occurrences to generate
+   * @param {number} [maxOccurrences=365] - Maximum number of occurrences to return.
+   *   Only occurrences inside the range count towards this limit; occurrences
+   *   between the series start and rangeStart do not consume it.
    * @param {string} [timezone] - Timezone for expansion (important for DST)
    * @returns {import('../types.js').EventOccurrence[]} Array of occurrence objects with start/end dates
    */
@@ -98,6 +111,8 @@ export class RecurrenceEngine {
 
     // Work in event's timezone for accurate recurrence calculation
     const currentDate = new Date(event.start);
+    // Steps taken from DTSTART: RFC 5545 COUNT is measured from there,
+    // independent of how many occurrences fall inside the range
     let count = 0;
 
     // Track DST transitions for proper timezone handling
@@ -112,7 +127,31 @@ export class RecurrenceEngine {
     const hasExceptions = !!(rule.exceptions && rule.exceptions.length > 0);
     let currentMs = currentDate.getTime();
 
-    while (currentMs <= rangeEndMs && count < maxOccurrences) {
+    // Sub-daily rules step a fixed number of milliseconds, so the span
+    // before the range is skipped arithmetically instead of one step at a
+    // time; other frequencies take few enough steps per year to just walk
+    const stepMs = this._fixedStepMs(rule);
+    if (stepMs > 0 && currentMs < rangeStartMs) {
+      const seek = this._seekFixedStep(
+        currentMs,
+        rangeStartMs,
+        rangeEndMs,
+        stepMs,
+        rule.count ? rule.count - 1 : Infinity,
+        cursor => this._advanceInPlace(cursor, rule)
+      );
+      currentMs = seek.ms;
+      count = seek.steps;
+      currentDate.setTime(currentMs);
+    }
+
+    let iterations = 0;
+    while (
+      currentMs <= rangeEndMs &&
+      occurrences.length < maxOccurrences &&
+      iterations < RecurrenceEngine.MAX_ITERATIONS_HARD_LIMIT
+    ) {
+      iterations++;
       // Check if this occurrence is within the range
       if (currentMs >= rangeStartMs) {
         const occurrenceStart = new Date(currentMs);
@@ -223,7 +262,37 @@ export class RecurrenceEngine {
     let nextEventTzTransition = tzManager.getNextTransition(eventTimezone, currentMs, rangeEndMs);
     let nextSystemTransition = this._nextSystemTransition(currentMs, rangeEndMs);
 
-    while (currentMs <= rangeEndMs && count < maxOccurrences) {
+    // Seek to the last occurrence before the range. nextEventTzTransition is
+    // deliberately left as computed from DTSTART: if the seek passed an
+    // event-timezone transition, the first in-range occurrence must still
+    // compare its offset with lastOffset, exactly as the general loop does.
+    if (currentMs < rangeStartMs) {
+      const maxSteps = rule.count ? rule.count - 1 : Infinity;
+      const seek = dayDeltas
+        ? this._seekWeekCycle(currentMs, weekday, rangeStartMs, rangeEndMs, rule, maxSteps)
+        : this._seekFixedStep(
+            currentMs,
+            rangeStartMs,
+            rangeEndMs,
+            stepDays * DAY,
+            maxSteps,
+            cursor => cursor.setDate(cursor.getDate() + stepDays)
+          );
+      currentMs = seek.ms;
+      count = seek.steps;
+      nextSystemTransition = seek.nextSystemTransition;
+      if (dayDeltas) {
+        weekday = seek.weekday;
+      }
+    }
+
+    let iterations = 0;
+    while (
+      currentMs <= rangeEndMs &&
+      occurrences.length < maxOccurrences &&
+      iterations < RecurrenceEngine.MAX_ITERATIONS_HARD_LIMIT
+    ) {
+      iterations++;
       if (currentMs >= rangeStartMs) {
         const occurrenceStart = new Date(currentMs);
         const occurrenceEnd = new Date(currentMs + duration);
@@ -274,6 +343,152 @@ export class RecurrenceEngine {
     }
 
     return occurrences;
+  }
+
+  /**
+   * Milliseconds per step for rules whose step is a fixed duration while
+   * the system UTC offset is constant. Only the sub-daily frequencies are
+   * reported here: DAILY and WEEKLY have their own numeric loop, and the
+   * calendar-based frequencies take too few steps per year to need seeking.
+   * @param {Object} rule - Parsed recurrence rule
+   * @returns {number} Step length in milliseconds, or 0 when not fixed
+   * @private
+   */
+  static _fixedStepMs(rule) {
+    const interval = rule.interval;
+    if (!Number.isInteger(interval) || interval <= 0) {
+      return 0;
+    }
+    switch (rule.freq) {
+      case 'SECONDLY':
+        return interval * 1000;
+      case 'MINUTELY':
+        return interval * 60000;
+      case 'HOURLY':
+        return interval * 3600000;
+      default:
+        return 0;
+    }
+  }
+
+  /**
+   * Skip the occurrences of a fixed-step rule that fall before
+   * rangeStartMs without visiting each one.
+   *
+   * While the system UTC offset is constant, a wall-clock step of the
+   * cursor is a constant number of milliseconds, so a whole run of steps
+   * collapses into one multiplication. The single step that crosses a
+   * system-timezone transition is taken with `advance` instead, so the
+   * cursor ends up exactly where stepping every occurrence would have put
+   * it. Stops at the last occurrence before rangeStartMs; the caller's loop
+   * takes the step into the range.
+   *
+   * @param {number} fromMs - Cursor position (an occurrence instant)
+   * @param {number} rangeStartMs - Seek target
+   * @param {number} rangeEndMs - Upper bound for transition lookup
+   * @param {number} stepMs - Step length while the UTC offset is constant
+   * @param {number} maxSteps - Steps still permitted under COUNT (Infinity if unbounded)
+   * @param {(cursor: Date) => void} advance - Wall-clock step, mutating the cursor
+   * @returns {{ ms: number, steps: number, nextSystemTransition: number }}
+   *   Cursor position, steps taken and the next system transition after it
+   * @private
+   */
+  static _seekFixedStep(fromMs, rangeStartMs, rangeEndMs, stepMs, maxSteps, advance) {
+    let ms = fromMs;
+    let steps = 0;
+    let nextSystemTransition = this._nextSystemTransition(ms, rangeEndMs);
+    if (!Number.isFinite(rangeStartMs) || !(stepMs > 0)) {
+      return { ms, steps, nextSystemTransition };
+    }
+    // Comparisons are written so an invalid (NaN) cursor ends the seek
+    while (ms < rangeStartMs && steps < maxSteps) {
+      const limit = Math.min(rangeStartMs, nextSystemTransition);
+      // Largest k with ms + k * stepMs < limit
+      let k = Math.ceil((limit - ms) / stepMs) - 1;
+      if (ms + k * stepMs >= limit) {
+        k--; // division rounded up
+      }
+      k = Math.min(k, maxSteps - steps);
+      if (k > 0) {
+        ms += k * stepMs;
+        steps += k;
+        continue;
+      }
+      if (ms + stepMs >= rangeStartMs) {
+        break; // next step lands in the range
+      }
+      // Next step crosses a system-timezone transition
+      const cursor = new Date(ms);
+      advance(cursor);
+      ms = cursor.getTime();
+      steps++;
+      nextSystemTransition = this._nextSystemTransition(ms, rangeEndMs);
+    }
+    return { ms, steps, nextSystemTransition };
+  }
+
+  /**
+   * Seek for WEEKLY BYDAY rules, whose step pattern repeats every week:
+   * whole weeks are skipped arithmetically from any weekday in the BYDAY
+   * set, and single steps (identical to the expansion loop's) are only
+   * taken to reach the set, around system-timezone transitions and in the
+   * last week before the range.
+   *
+   * @param {number} fromMs - Cursor position (an occurrence instant)
+   * @param {number} weekday - Weekday of the cursor (Date#getDay)
+   * @param {number} rangeStartMs - Seek target
+   * @param {number} rangeEndMs - Upper bound for transition lookup
+   * @param {Object} rule - Parsed rule with compiled _byDaySet/_byDayDeltas
+   * @param {number} maxSteps - Steps still permitted under COUNT (Infinity if unbounded)
+   * @returns {{ ms: number, steps: number, weekday: number, nextSystemTransition: number }}
+   * @private
+   */
+  static _seekWeekCycle(fromMs, weekday, rangeStartMs, rangeEndMs, rule, maxSteps) {
+    const DAY = 86400000;
+    const WEEK = 7 * DAY;
+    const daySet = rule._byDaySet;
+    const dayDeltas = rule._byDayDeltas;
+    const stepsPerWeek = daySet.size;
+    let ms = fromMs;
+    let steps = 0;
+    let nextSystemTransition = this._nextSystemTransition(ms, rangeEndMs);
+    if (!Number.isFinite(rangeStartMs)) {
+      return { ms, steps, weekday, nextSystemTransition };
+    }
+    while (ms < rangeStartMs && steps < maxSteps) {
+      // A week from a weekday in the set is exactly stepsPerWeek steps and
+      // returns to the same weekday
+      if (daySet.has(weekday)) {
+        const limit = Math.min(rangeStartMs, nextSystemTransition);
+        let weeks = Math.ceil((limit - ms) / WEEK) - 1;
+        if (ms + weeks * WEEK >= limit) {
+          weeks--;
+        }
+        weeks = Math.min(weeks, Math.floor((maxSteps - steps) / stepsPerWeek));
+        if (weeks > 0) {
+          ms += weeks * WEEK;
+          steps += weeks * stepsPerWeek;
+          continue;
+        }
+      }
+      // Single step, identical to the expansion loop
+      const days = dayDeltas[weekday];
+      const naiveMs = ms + days * DAY;
+      if (naiveMs >= rangeStartMs) {
+        break; // next step lands in the range
+      }
+      weekday = (weekday + days) % 7;
+      if (naiveMs >= nextSystemTransition) {
+        const cursor = new Date(ms);
+        cursor.setDate(cursor.getDate() + days);
+        ms = cursor.getTime();
+        nextSystemTransition = this._nextSystemTransition(ms, rangeEndMs);
+      } else {
+        ms = naiveMs;
+      }
+      steps++;
+    }
+    return { ms, steps, weekday, nextSystemTransition };
   }
 
   /**

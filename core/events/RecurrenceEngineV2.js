@@ -4,11 +4,19 @@
  */
 
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
+import { RecurrenceEngine } from './RecurrenceEngine.js';
 import { RRuleParser } from './RRuleParser.js';
+
+const DAY = 86400000;
 
 export class RecurrenceEngineV2 {
   // Hard limit to prevent resource exhaustion regardless of caller input
   static MAX_OCCURRENCES_HARD_LIMIT = 10000;
+
+  // Hard limit on expansion loop iterations (every occurrence stepped
+  // through, inside the range or not) so a rule that cannot be seeked
+  // arithmetically still terminates in bounded time
+  static MAX_ITERATIONS_HARD_LIMIT = 100000;
 
   constructor() {
     // Use singleton to share cache across all components
@@ -27,10 +35,22 @@ export class RecurrenceEngineV2 {
 
   /**
    * Expand recurring event with advanced handling
-   * @param {Event} event - Recurring event
+   *
+   * Occurrences before rangeStart are skipped without being generated:
+   * daily, weekly, hourly and minutely rules seek straight to the range, so
+   * a series that started years before the queried window is expanded at
+   * the same cost as one that started yesterday.
+   *
+   * @param {import('./Event.js').Event} event - Recurring event
    * @param {Date} rangeStart - Start of expansion range
    * @param {Date} rangeEnd - End of expansion range
    * @param {Object} options - Expansion options
+   * @param {number} [options.maxOccurrences=365] - Maximum number of occurrences to
+   *   return. Only occurrences inside the range count towards this limit.
+   * @param {boolean} [options.includeModified=true] - Apply stored instance modifications
+   * @param {boolean} [options.includeCancelled=false] - Return exception dates as cancelled occurrences
+   * @param {string} [options.timezone] - Timezone for expansion (defaults to the event's)
+   * @param {boolean} [options.handleDST=true] - Adjust occurrences across DST transitions
    * @returns {Array} Expanded occurrences
    */
   expandEvent(event, rangeStart, rangeEnd, options = {}) {
@@ -59,7 +79,8 @@ export class RecurrenceEngineV2 {
     const occurrences = [];
     const duration = event.end - event.start;
 
-    // Initialize expansion state
+    // Initialize expansion state. `count` is the number of steps taken from
+    // DTSTART, which is what RFC 5545 COUNT measures.
     const state = {
       currentDate: new Date(event.start),
       count: 0,
@@ -73,8 +94,16 @@ export class RecurrenceEngineV2 {
       state.dstTransitions = this.findDSTTransitions(rangeStart, rangeEnd, timezone);
     }
 
+    this.seekToRange(state, rule, rangeStart, rangeEnd, timezone);
+
     // Expand occurrences
-    while (state.currentDate <= rangeEnd && state.count < maxOccurrences) {
+    let iterations = 0;
+    while (
+      state.currentDate <= rangeEnd &&
+      occurrences.length < maxOccurrences &&
+      iterations < RecurrenceEngineV2.MAX_ITERATIONS_HARD_LIMIT
+    ) {
+      iterations++;
       if (state.currentDate >= rangeStart) {
         const occurrence = this.generateOccurrence(
           event,
@@ -142,6 +171,77 @@ export class RecurrenceEngineV2 {
     this.cacheOccurrences(cacheKey, occurrences);
 
     return this.cloneOccurrences(occurrences);
+  }
+
+  /**
+   * Move the expansion cursor to the last occurrence before the range
+   * without stepping through every occurrence in between.
+   *
+   * Applies to rules whose step is a fixed duration between system-timezone
+   * transitions (plain DAILY and WEEKLY, HOURLY, MINUTELY); the step that
+   * crosses a transition is taken with getNextDate so the result is exactly
+   * what stepping from DTSTART would produce. Never seeks past UNTIL, and
+   * counts skipped steps against COUNT.
+   *
+   * @param {Object} state - Expansion state (currentDate and count are updated)
+   * @param {Object} rule - Parsed recurrence rule
+   * @param {Date} rangeStart - Start of expansion range
+   * @param {Date} rangeEnd - End of expansion range
+   * @param {string} timezone - Expansion timezone
+   */
+  seekToRange(state, rule, rangeStart, rangeEnd, timezone) {
+    const stepMs = this.getFixedStepMs(rule);
+    if (stepMs <= 0) {
+      return;
+    }
+    let targetMs = rangeStart.getTime();
+    if (rule.until) {
+      // Rule objects may carry UNTIL as a string; an unparseable value
+      // compares false and leaves the target alone
+      const untilMs = new Date(rule.until).getTime();
+      if (untilMs < targetMs) {
+        targetMs = untilMs;
+      }
+    }
+    const fromMs = state.currentDate.getTime();
+    if (!(fromMs < targetMs)) {
+      return;
+    }
+    const seek = RecurrenceEngine._seekFixedStep(
+      fromMs,
+      targetMs,
+      rangeEnd.getTime(),
+      stepMs,
+      rule.count ? rule.count - 1 : Infinity,
+      cursor => cursor.setTime(this.getNextDate(cursor, rule, timezone, state).getTime())
+    );
+    state.currentDate = new Date(seek.ms);
+    state.count = seek.steps;
+  }
+
+  /**
+   * Milliseconds per step for rules getNextDate advances by a fixed
+   * duration while the system UTC offset is constant
+   * @param {Object} rule - Parsed recurrence rule
+   * @returns {number} Step length in milliseconds, or 0 when not fixed
+   */
+  getFixedStepMs(rule) {
+    const interval = rule.interval;
+    if (!Number.isInteger(interval) || interval <= 0) {
+      return 0;
+    }
+    switch (rule.freq) {
+      case 'DAILY':
+        return rule.byHour && rule.byHour.length > 0 ? 0 : interval * DAY;
+      case 'WEEKLY':
+        return rule.byDay && rule.byDay.length > 0 ? 0 : 7 * interval * DAY;
+      case 'HOURLY':
+        return interval * 3600000;
+      case 'MINUTELY':
+        return interval * 60000;
+      default:
+        return 0;
+    }
   }
 
   /**
