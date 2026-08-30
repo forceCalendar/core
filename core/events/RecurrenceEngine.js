@@ -4,6 +4,11 @@ import { RRuleParser } from './RRuleParser.js';
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
+// Timezone databases know only local mean time before the 19th century, so
+// a span that ends before this instant is checked at its ends rather than
+// probed week by week
+const PRE_TZDATA_FLOOR_MS = Date.UTC(1800, 0, 1);
+
 /**
  * RecurrenceEngine - Handles expansion of recurring events
  * Full support for RFC 5545 (iCalendar) RRULE specification
@@ -822,7 +827,9 @@ export class RecurrenceEngine {
 
   /**
    * Find the next system-timezone offset transition after fromMs.
-   * Cached module-wide: the system timezone is fixed for the process.
+   * Cached module-wide: the system timezone is fixed for the process. The
+   * cache grows incrementally, so extending coverage (a view navigating
+   * forward, a series with a far-past DTSTART) scans only the new span.
    * @param {number} fromMs - Search from this timestamp (exclusive)
    * @param {number} toMs - Extend cache coverage at least this far
    * @returns {number} Transition timestamp, or Infinity if none within coverage
@@ -833,18 +840,34 @@ export class RecurrenceEngine {
       return Infinity;
     }
     let cache = this._systemTransitions;
-    if (!cache || fromMs < cache.from || toMs > cache.to) {
-      const from = Math.min(fromMs, cache ? cache.from : fromMs);
-      const to = Math.max(toMs, cache ? cache.to : toMs);
-      cache = { from, to, transitions: this._scanSystemTransitions(from, to) };
+    if (!cache) {
+      cache = { from: fromMs, to: toMs, transitions: this._scanSystemTransitions(fromMs, toMs) };
       this._systemTransitions = cache;
-    }
-    for (const t of cache.transitions) {
-      if (t > fromMs) {
-        return t;
+    } else {
+      if (fromMs < cache.from) {
+        cache.transitions = this._scanSystemTransitions(fromMs, cache.from).concat(
+          cache.transitions
+        );
+        cache.from = fromMs;
+      }
+      if (toMs > cache.to) {
+        cache.transitions = cache.transitions.concat(this._scanSystemTransitions(cache.to, toMs));
+        cache.to = toMs;
       }
     }
-    return Infinity;
+    // First transition after fromMs; the list is sorted
+    const transitions = cache.transitions;
+    let lo = 0;
+    let hi = transitions.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (transitions[mid] > fromMs) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    return lo < transitions.length ? transitions[lo] : Infinity;
   }
 
   /**
@@ -858,6 +881,12 @@ export class RecurrenceEngine {
     const transitions = [];
     let lo = fromMs;
     let loOffset = new Date(lo).getTimezoneOffset();
+    // The pre-tzdata era has a single offset (local mean time) and is
+    // skipped in one step; probing it week by week could take minutes
+    if (lo < PRE_TZDATA_FLOOR_MS) {
+      lo = Math.min(toMs, PRE_TZDATA_FLOOR_MS);
+      loOffset = new Date(lo).getTimezoneOffset();
+    }
     while (lo < toMs) {
       const hi = Math.min(lo + WEEK, toMs);
       const hiOffset = new Date(hi).getTimezoneOffset();

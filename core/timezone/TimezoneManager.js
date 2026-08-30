@@ -10,6 +10,11 @@ import { TimezoneDatabase } from './TimezoneDatabase.js';
 // Singleton instance for shared use across the application
 let sharedInstance = null;
 
+// Timezone databases know only local mean time before the 19th century, so
+// transition scans check a span that ends before this instant at its ends
+// rather than probing it week by week
+const PRE_TZDATA_FLOOR_MS = Date.UTC(1800, 0, 1);
+
 export class TimezoneManager {
   /**
    * Get the shared singleton instance of TimezoneManager
@@ -215,18 +220,42 @@ export class TimezoneManager {
     }
     timezone = this.database.resolveAlias(timezone);
     let cached = this.transitionCache.get(timezone);
-    if (!cached || fromMs < cached.from || toMs > cached.to) {
-      // Extend coverage generously so repeated expansions over the same
-      // span hit the cache
-      const from = Math.min(fromMs, cached ? cached.from : fromMs);
-      const to = Math.max(toMs, cached ? cached.to : toMs);
-      cached = { from, to, transitions: this._scanTransitions(timezone, from, to) };
+    if (!cached) {
+      cached = {
+        from: fromMs,
+        to: toMs,
+        transitions: this._scanTransitions(timezone, fromMs, toMs)
+      };
       this.transitionCache.set(timezone, cached);
-    }
-    for (const t of cached.transitions) {
-      if (t > fromMs) {
-        return t <= toMs ? t : Infinity;
+    } else {
+      // Extend coverage incrementally so only the uncovered span is scanned
+      if (fromMs < cached.from) {
+        cached.transitions = this._scanTransitions(timezone, fromMs, cached.from).concat(
+          cached.transitions
+        );
+        cached.from = fromMs;
       }
+      if (toMs > cached.to) {
+        cached.transitions = cached.transitions.concat(
+          this._scanTransitions(timezone, cached.to, toMs)
+        );
+        cached.to = toMs;
+      }
+    }
+    // First transition after fromMs; the list is sorted
+    const transitions = cached.transitions;
+    let lo = 0;
+    let hi = transitions.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (transitions[mid] > fromMs) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    if (lo < transitions.length && transitions[lo] <= toMs) {
+      return transitions[lo];
     }
     return Infinity;
   }
@@ -247,6 +276,13 @@ export class TimezoneManager {
     const offsetAt = ms => this.getTimezoneOffset(new Date(ms), timezone);
     let lo = fromMs;
     let loOffset = offsetAt(lo);
+    // Timezone databases know only local mean time before the 19th century:
+    // that era has a single offset and is skipped in one step (probing it
+    // week by week could take minutes for a very old DTSTART)
+    if (lo < PRE_TZDATA_FLOOR_MS) {
+      lo = Math.min(toMs, PRE_TZDATA_FLOOR_MS);
+      loOffset = offsetAt(lo);
+    }
     while (lo < toMs) {
       const hi = Math.min(lo + WEEK, toMs);
       const hiOffset = offsetAt(hi);
