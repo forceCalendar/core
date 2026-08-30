@@ -5,6 +5,12 @@ import { PerformanceOptimizer } from '../performance/PerformanceOptimizer.js';
 import { ConflictDetector } from '../conflicts/ConflictDetector.js';
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
 
+// Events are indexed and expanded on their own wall clock, which can differ
+// from the query timezone's by up to 26 hours (UTC-12 to UTC+14). Day
+// queries therefore look this many days beyond each edge before filtering
+// precisely in the query timezone.
+const TIMEZONE_PAD_DAYS = 2;
+
 /**
  * EventStore - Manages calendar events with efficient querying
  * Uses Map for O(1) lookups and spatial indexing concepts for date queries
@@ -415,10 +421,14 @@ export class EventStore {
       }
     }
 
+    // Series are expanded on their own wall clock, so cover the offset
+    // spread and let _selectEventsForDay decide in the query timezone
+    const expandStart = DateUtils.addDays(dayStart, -TIMEZONE_PAD_DAYS);
+    const expandEnd = DateUtils.addDays(dayEnd, TIMEZONE_PAD_DAYS);
     for (const id of this.indices.recurring) {
       const event = this.events.get(id);
       if (event) {
-        candidates.push(...this.expandRecurringEvent(event, dayStart, dayEnd, timezone));
+        candidates.push(...this.expandRecurringEvent(event, expandStart, expandEnd, timezone));
       }
     }
 
@@ -454,11 +464,11 @@ export class EventStore {
       byDate.set(DateUtils.getLocalDateString(day), []);
     }
 
-    // Query one day beyond each edge so events that fall on an edge day in
-    // the requested timezone are not lost to the UTC-based range filter.
+    // Query beyond each edge so events that fall on an edge day in the
+    // requested timezone are not lost to the range filter on event wall clocks.
     const events = this.getEventsInRange(
-      DateUtils.addDays(rangeStart, -1),
-      DateUtils.addDays(rangeEnd, 1),
+      DateUtils.addDays(rangeStart, -TIMEZONE_PAD_DAYS),
+      DateUtils.addDays(rangeEnd, TIMEZONE_PAD_DAYS),
       true,
       timezone
     );
@@ -493,7 +503,7 @@ export class EventStore {
 
     // Check byDate index for nearby dates (handles most events)
     const checkDate = new Date(date);
-    for (let offset = -1; offset <= 1; offset++) {
+    for (let offset = -TIMEZONE_PAD_DAYS; offset <= TIMEZONE_PAD_DAYS; offset++) {
       const tempDate = new Date(checkDate);
       tempDate.setDate(tempDate.getDate() + offset);
       const tempDateStr = DateUtils.getLocalDateString(tempDate);

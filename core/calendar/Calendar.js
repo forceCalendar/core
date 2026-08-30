@@ -704,11 +704,19 @@ export class Calendar {
    * @private
    */
   _getDayViewData(date) {
+    const timezone = this.config.timeZone;
     const events = this.getEventsForDate(date);
 
-    // Separate all-day and timed events
+    // Separate all-day and timed events. Hour slots are placed on the
+    // calendar's wall clock, so timed events are compared in that timezone.
     const allDayEvents = events.filter(e => e.allDay);
-    const timedEvents = events.filter(e => !e.allDay);
+    const timedEvents = events
+      .filter(e => !e.allDay)
+      .map(event => ({
+        event,
+        start: event.getStartInTimezone(timezone),
+        end: event.getEndInTimezone(timezone)
+      }));
 
     // Create hourly slots for timed events
     const hours = [];
@@ -721,11 +729,13 @@ export class Calendar {
       hours.push({
         hour,
         time: DateUtils.formatTime(hourDate, this.state.get('locale')),
-        events: timedEvents.filter(event => {
-          // Check if event occurs during this hour (not just starts)
-          // Event occurs in this hour if it overlaps with the hour slot
-          return event.start < hourEnd && event.end > hourDate;
-        })
+        events: timedEvents
+          .filter(({ start, end }) => {
+            // Check if event occurs during this hour (not just starts)
+            // Event occurs in this hour if it overlaps with the hour slot
+            return start < hourEnd && end > hourDate;
+          })
+          .map(({ event }) => event)
       });
     }
 
