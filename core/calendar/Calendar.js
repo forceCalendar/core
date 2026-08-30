@@ -389,6 +389,64 @@ export class Calendar {
   }
 
   /**
+   * Lazily iterate the occurrences of an event in chronological order.
+   *
+   * Occurrences are produced one at a time, so taking the next few of an
+   * open-ended series does not expand the series. `after` and `before`
+   * are exclusive unless `inclusive` is set; see
+   * RecurrenceEngineV2.iterateOccurrences for the full semantics.
+   *
+   * @example
+   * for (const occurrence of calendar.iterateOccurrences('standup', { after: new Date() })) {
+   *   if (occurrence.start > deadline) break;
+   *   remind(occurrence);
+   * }
+   *
+   * @param {string} eventId - The event ID
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>} Occurrences in chronological order
+   * @throws {Error} If no event with the ID exists
+   */
+  iterateOccurrences(eventId, options = {}) {
+    return this.eventStore.iterateOccurrences(eventId, options);
+  }
+
+  /**
+   * First occurrence of an event after an instant, or null when the
+   * series has no occurrence after it. `after` is exclusive unless
+   * `options.inclusive` is set.
+   *
+   * @example
+   * const upcoming = calendar.getNextOccurrence('standup', new Date());
+   *
+   * @param {string} eventId - The event ID
+   * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Further options
+   * @returns {import('../types.js').ExpandedOccurrence|null} The next occurrence, or null
+   * @throws {Error} If no event with the ID exists
+   */
+  getNextOccurrence(eventId, after = null, options = {}) {
+    return this.eventStore.getNextOccurrence(eventId, after, options);
+  }
+
+  /**
+   * The first `count` occurrences of an event inside a window, generated
+   * lazily. `count` is capped at the engine's MAX_OCCURRENCES_HARD_LIMIT.
+   *
+   * @example
+   * const nextFive = calendar.takeOccurrences('standup', 5, { after: new Date() });
+   *
+   * @param {string} eventId - The event ID
+   * @param {number} count - Maximum number of occurrences to return
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
+   * @throws {Error} If no event with the ID exists
+   */
+  takeOccurrences(eventId, count, options = {}) {
+    return this.eventStore.takeOccurrences(eventId, count, options);
+  }
+
+  /**
    * Set the calendar's timezone
    * @param {string} timezone - IANA timezone identifier
    */

@@ -148,6 +148,62 @@ export class EnhancedCalendar extends Calendar {
   }
 
   /**
+   * Lazily iterate the occurrences of an event through the enhanced
+   * engine, so occurrences changed with modifyOccurrence or cancelled with
+   * cancelOccurrence are reflected. Same semantics as
+   * Calendar#iterateOccurrences.
+   * @param {string} eventId - The event ID
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>} Occurrences in chronological order
+   * @throws {Error} If no event with the ID exists
+   */
+  iterateOccurrences(eventId, options = {}) {
+    const query = this._occurrenceQuery(eventId, options);
+    return this.recurrenceEngine.iterateOccurrences(query.event, query.options);
+  }
+
+  /**
+   * First occurrence of an event after an instant through the enhanced
+   * engine, or null. Same semantics as Calendar#getNextOccurrence.
+   * @param {string} eventId - The event ID
+   * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Further options
+   * @returns {import('../types.js').ExpandedOccurrence|null} The next occurrence, or null
+   * @throws {Error} If no event with the ID exists
+   */
+  getNextOccurrence(eventId, after = null, options = {}) {
+    const query = this._occurrenceQuery(eventId, options);
+    return this.recurrenceEngine.nextOccurrence(query.event, after, query.options);
+  }
+
+  /**
+   * The first `count` occurrences of an event through the enhanced
+   * engine. Same semantics as Calendar#takeOccurrences.
+   * @param {string} eventId - The event ID
+   * @param {number} count - Maximum number of occurrences to return
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
+   * @throws {Error} If no event with the ID exists
+   */
+  takeOccurrences(eventId, count, options = {}) {
+    const query = this._occurrenceQuery(eventId, options);
+    return this.recurrenceEngine.takeOccurrences(query.event, count, query.options);
+  }
+
+  /**
+   * Resolve an occurrence query to the stored event and its options, with
+   * the timezone defaulted as getEventsInRange does
+   * @private
+   */
+  _occurrenceQuery(eventId, options) {
+    const event = this.eventStore.getEvent(eventId);
+    if (!event) {
+      throw new Error(`Event with id ${eventId} not found`);
+    }
+    return { event, options: { ...options, timezone: options.timezone || event.timeZone } };
+  }
+
+  /**
    * Bulk operations for recurring events
    */
   async bulkModifyOccurrences(eventId, dateRange, modifications) {

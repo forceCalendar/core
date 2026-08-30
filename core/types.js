@@ -346,6 +346,58 @@
  * @property {Date} start - Occurrence start date
  * @property {Date} end - Occurrence end date
  * @property {string} recurringEventId - ID of the parent recurring event
+ * @property {string} [timezone] - Timezone the occurrence was expanded in
+ * @property {Date} [originalStart] - Start of the series (DTSTART)
+ */
+
+/**
+ * Window for lazy occurrence iteration. Both bounds are exclusive unless
+ * `inclusive` is set: an occurrence starting exactly at `after` or `before`
+ * is skipped by default, so iterating from a known occurrence's start
+ * continues the series without repeating it. Omit a bound to leave that
+ * end of the window open.
+ * @typedef {Object} OccurrenceIteratorOptions
+ * @property {Date|number} [after] - Only occurrences starting after this instant (Date or timestamp)
+ * @property {Date|number} [before] - Only occurrences starting before this instant (Date or timestamp)
+ * @property {boolean} [inclusive=false] - Treat `after` and `before` as closed bounds
+ * @property {string} [timezone] - Timezone for expansion (defaults to the event's)
+ */
+
+/**
+ * Options for lazy occurrence iteration through RecurrenceEngineV2,
+ * EventStore and Calendar: the OccurrenceIteratorOptions window plus the
+ * expansion switches RecurrenceEngineV2.expandEvent accepts.
+ * @typedef {Object} ExpandedOccurrenceIteratorOptions
+ * @property {Date|number} [after] - Only occurrences starting after this instant (Date or timestamp)
+ * @property {Date|number} [before] - Only occurrences starting before this instant (Date or timestamp)
+ * @property {boolean} [inclusive=false] - Treat `after` and `before` as closed bounds
+ * @property {string} [timezone] - Timezone for expansion (defaults to the event's)
+ * @property {boolean} [includeModified=true] - Apply stored instance modifications
+ * @property {boolean} [includeCancelled=false] - Yield exception dates as cancelled occurrences
+ * @property {boolean} [handleDST=true] - Adjust occurrences across DST transitions
+ */
+
+/**
+ * Occurrence produced by RecurrenceEngineV2 (and therefore by EventStore
+ * and Calendar occurrence queries)
+ * @typedef {Object} ExpandedOccurrence
+ * @property {string} id - Occurrence ID (`<eventId>_<startTimestamp>` for recurring events)
+ * @property {string} [recurringEventId] - ID of the parent recurring event
+ * @property {string} title - Event title
+ * @property {Date} start - Occurrence start date
+ * @property {Date} end - Occurrence end date
+ * @property {Date} [startUTC] - Occurrence start in UTC
+ * @property {Date} [endUTC] - Occurrence end in UTC
+ * @property {string} timezone - Timezone the occurrence was expanded in
+ * @property {Date} [originalStart] - Start of the series (DTSTART)
+ * @property {boolean} allDay - Whether the event is all-day
+ * @property {string} [description] - Event description
+ * @property {string} [location] - Event location
+ * @property {string[]} [categories] - Event categories
+ * @property {EventStatus} [status] - 'confirmed', or 'cancelled' for exception dates yielded with includeCancelled
+ * @property {string} [cancellationReason] - Reason recorded for a cancelled occurrence
+ * @property {boolean} isRecurring - Whether the occurrence belongs to a recurring series
+ * @property {boolean} [isModified] - Whether a stored instance modification was applied
  */
 
 /**

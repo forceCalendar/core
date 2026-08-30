@@ -17,8 +17,9 @@ path brought DAILY/WEEKLY expansion to **1.8–2.2× of `rrule`** — at the pub
 target. Remaining work:
 - MONTHLY/YEARLY still use the general Date-stepping loop (~4–8× on microsecond-scale
   workloads); extend numeric iteration if profiling shows real-world need
-- Add a lazy occurrence iterator so callers can take N occurrences without expanding
-  the full window
+- Lazy occurrence iteration — **shipped**: `iterateOccurrences`, `nextOccurrence` and
+  `takeOccurrences` on both engines, `EventStore` and `Calendar` take N occurrences or
+  find the next one without expanding a window
 
 ### TypeScript declarations
 **Status: shipped in v2.2.0.** Declarations are generated from JSDoc at publish time

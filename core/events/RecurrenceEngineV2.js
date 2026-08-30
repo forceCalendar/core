@@ -9,6 +9,9 @@ import { RRuleParser } from './RRuleParser.js';
 
 const DAY = 86400000;
 
+// How far ahead of the iteration cursor DST transitions are scanned at a time
+const DST_SCAN_CHUNK = 100 * DAY;
+
 export class RecurrenceEngineV2 {
   // Hard limit to prevent resource exhaustion regardless of caller input
   static MAX_OCCURRENCES_HARD_LIMIT = 10000;
@@ -51,7 +54,7 @@ export class RecurrenceEngineV2 {
    * @param {boolean} [options.includeCancelled=false] - Return exception dates as cancelled occurrences
    * @param {string} [options.timezone] - Timezone for expansion (defaults to the event's)
    * @param {boolean} [options.handleDST=true] - Adjust occurrences across DST transitions
-   * @returns {Array} Expanded occurrences
+   * @returns {import('../types.js').ExpandedOccurrence[]} Expanded occurrences
    */
   expandEvent(event, rangeStart, rangeEnd, options = {}) {
     const {
@@ -105,40 +108,15 @@ export class RecurrenceEngineV2 {
     ) {
       iterations++;
       if (state.currentDate >= rangeStart) {
-        const occurrence = this.generateOccurrence(
+        const occurrence = this._applyOverrides(
           event,
-          state.currentDate,
-          duration,
-          timezone,
-          state
+          this.generateOccurrence(event, state.currentDate, duration, timezone, state),
+          rule,
+          includeCancelled,
+          includeModified
         );
-
-        // Check exceptions and modifications
         if (occurrence) {
-          let shouldInclude = true;
-
-          // Skip if exception
-          if (this.isException(event.id, occurrence.start, rule)) {
-            if (!includeCancelled) {
-              shouldInclude = false;
-            } else {
-              occurrence.status = 'cancelled';
-              occurrence.cancellationReason = this.getExceptionReason(event.id, occurrence.start);
-            }
-          }
-
-          // Apply modifications if any
-          if (shouldInclude && includeModified) {
-            const modified = this.getModifiedInstance(event.id, occurrence.start);
-            if (modified) {
-              Object.assign(occurrence, modified);
-              occurrence.isModified = true;
-            }
-          }
-
-          if (shouldInclude) {
-            occurrences.push(occurrence);
-          }
+          occurrences.push(occurrence);
         }
       }
 
@@ -171,6 +149,242 @@ export class RecurrenceEngineV2 {
     this.cacheOccurrences(cacheKey, occurrences);
 
     return this.cloneOccurrences(occurrences);
+  }
+
+  /**
+   * Lazily iterate the occurrences of an event in chronological order.
+   *
+   * Yields what expandEvent returns for the window, one occurrence at a
+   * time and without the expansion cache: stored instance modifications
+   * and exceptions are applied as each occurrence is produced, so changes
+   * made through addModifiedInstance or addException are visible on the
+   * next pull. Rules seekToRange can seek (plain daily and weekly, hourly,
+   * minutely) jump straight to `after`, and DST transitions are scanned
+   * lazily ahead of the cursor instead of for the whole window up front.
+   *
+   * Both bounds are exclusive unless `inclusive` is set: an occurrence that
+   * starts exactly at `after` or `before` is skipped by default, so
+   * iterating from a known occurrence's start continues the series without
+   * repeating it; with `inclusive: true` the window is closed on both ends
+   * like expandEvent's range. A non-recurring event yields its single
+   * occurrence when it falls inside the window. Iteration ends at COUNT or
+   * UNTIL, at `before`, or — as a guard for rules that produce no
+   * occurrences — after MAX_ITERATIONS_HARD_LIMIT consecutive steps
+   * without one. The generator is single-use; call again for a fresh one.
+   *
+   * @example
+   * const engine = new RecurrenceEngineV2();
+   * for (const occurrence of engine.iterateOccurrences(event, { after: new Date() })) {
+   *   if (occurrence.start > deadline) break;
+   *   schedule(occurrence);
+   * }
+   *
+   * @param {import('./Event.js').Event} event - The event to iterate
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>} Occurrences in chronological order
+   * @throws {TypeError} If `after` or `before` is not a valid Date or timestamp
+   */
+  iterateOccurrences(event, options = {}) {
+    const window = RecurrenceEngine._occurrenceWindow(options);
+    if (!event.recurring || !event.recurrenceRule) {
+      return this._iterateSingle(event, window);
+    }
+    const {
+      includeModified = true,
+      includeCancelled = false,
+      timezone = event.timeZone || 'UTC',
+      handleDST = true
+    } = options;
+    return this._iterateRule(event, RRuleParser.parse(event.recurrenceRule), window, {
+      includeModified,
+      includeCancelled,
+      timezone,
+      handleDST
+    });
+  }
+
+  /**
+   * First occurrence of an event after an instant, or null when the series
+   * has no occurrence after it. `after` is exclusive unless
+   * `options.inclusive` is set, so passing the start of a known occurrence
+   * returns the one that follows it.
+   *
+   * @example
+   * const upcoming = engine.nextOccurrence(event, new Date());
+   *
+   * @param {import('./Event.js').Event} event - The event to query
+   * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Further options
+   * @returns {import('../types.js').ExpandedOccurrence|null} The next occurrence, or null
+   */
+  nextOccurrence(event, after = null, options = {}) {
+    for (const occurrence of this.iterateOccurrences(event, { ...options, after })) {
+      return occurrence;
+    }
+    return null;
+  }
+
+  /**
+   * The first `count` occurrences of an event inside a window, generated
+   * lazily so an open-ended series costs only the occurrences taken.
+   * `count` is capped at MAX_OCCURRENCES_HARD_LIMIT; fewer are returned
+   * when the series or the window ends first.
+   *
+   * @example
+   * const nextFive = engine.takeOccurrences(event, 5, { after: new Date() });
+   *
+   * @param {import('./Event.js').Event} event - The event to query
+   * @param {number} count - Maximum number of occurrences to return
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
+   */
+  takeOccurrences(event, count, options = {}) {
+    const limit = Math.min(count, RecurrenceEngineV2.MAX_OCCURRENCES_HARD_LIMIT);
+    const taken = [];
+    if (!(limit > 0)) {
+      return taken;
+    }
+    for (const occurrence of this.iterateOccurrences(event, options)) {
+      taken.push(occurrence);
+      if (taken.length >= limit) {
+        break;
+      }
+    }
+    return taken;
+  }
+
+  /**
+   * Yield a non-recurring event's single occurrence if it starts inside
+   * the window
+   * @param {import('./Event.js').Event} event - The event
+   * @param {{ startMs: number, endMs: number }} window - Inclusive bounds
+   * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>}
+   * @private
+   */
+  *_iterateSingle(event, window) {
+    const ms = new Date(event.start).getTime();
+    if (ms >= window.startMs && ms <= window.endMs) {
+      yield this.cloneOccurrence(this.createOccurrence(event, event.start, event.end));
+    }
+  }
+
+  /**
+   * Lazy counterpart of the expandEvent loop: seeks to the window, then
+   * steps the cursor and yields each in-window occurrence with the same
+   * DST adjustment, exception handling and instance modifications.
+   * @private
+   */
+  *_iterateRule(event, rule, window, options) {
+    const { includeModified, includeCancelled, timezone, handleDST } = options;
+    const duration = event.end - event.start;
+    const state = {
+      currentDate: new Date(event.start),
+      count: 0,
+      tzOffsets: new Map(),
+      dstTransitions: [],
+      stuckIterations: 0
+    };
+    if (Number.isNaN(state.currentDate.getTime()) || window.startMs > window.endMs) {
+      return;
+    }
+
+    // DST transitions are found on the same day grid expandEvent walks,
+    // starting from the window start (DTSTART for an open window) and
+    // extended in chunks ahead of the cursor
+    let dstScan = null;
+    if (handleDST) {
+      const scanStart = Number.isFinite(window.startMs)
+        ? window.startMs
+        : state.currentDate.getTime();
+      dstScan = { cursor: new Date(scanStart), lastOffset: 0 };
+      dstScan.lastOffset = this.tzManager.getTimezoneOffset(dstScan.cursor, timezone);
+    }
+
+    if (Number.isFinite(window.startMs)) {
+      const rangeStart = new Date(window.startMs);
+      this.seekToRange(state, rule, rangeStart, rangeStart, timezone);
+    }
+
+    let idleSteps = 0;
+    while (state.currentDate.getTime() <= window.endMs) {
+      const currentMs = state.currentDate.getTime();
+      if (currentMs >= window.startMs) {
+        if (dstScan) {
+          this._scanDSTTransitions(
+            dstScan,
+            state.dstTransitions,
+            Math.min(currentMs + DST_SCAN_CHUNK, window.endMs),
+            timezone
+          );
+        }
+        const occurrence = this._applyOverrides(
+          event,
+          this.generateOccurrence(event, state.currentDate, duration, timezone, state),
+          rule,
+          includeCancelled,
+          includeModified
+        );
+        if (occurrence) {
+          idleSteps = 0;
+          yield this.cloneOccurrence(occurrence);
+        }
+      }
+
+      state.currentDate = this.getNextDate(state.currentDate, rule, timezone, state);
+      state.count++;
+
+      if (state.currentDate.getTime() <= currentMs) {
+        state.stuckIterations++;
+        if (state.stuckIterations >= 3) {
+          return;
+        }
+      } else {
+        state.stuckIterations = 0;
+      }
+
+      if (rule.count && state.count >= rule.count) {
+        return;
+      }
+      if (rule.until && state.currentDate > rule.until) {
+        return;
+      }
+      idleSteps++;
+      if (idleSteps >= RecurrenceEngineV2.MAX_ITERATIONS_HARD_LIMIT) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Apply exceptions and stored instance modifications to a generated
+   * occurrence
+   * @param {import('./Event.js').Event} event - The recurring event
+   * @param {Object} occurrence - Occurrence from generateOccurrence
+   * @param {Object} rule - Parsed recurrence rule
+   * @param {boolean} includeCancelled - Return exception dates as cancelled occurrences
+   * @param {boolean} includeModified - Apply stored instance modifications
+   * @returns {Object|null} The occurrence, or null when it is excluded
+   * @private
+   */
+  _applyOverrides(event, occurrence, rule, includeCancelled, includeModified) {
+    if (!occurrence) {
+      return null;
+    }
+    if (this.isException(event.id, occurrence.start, rule)) {
+      if (!includeCancelled) {
+        return null;
+      }
+      occurrence.status = 'cancelled';
+      occurrence.cancellationReason = this.getExceptionReason(event.id, occurrence.start);
+    }
+    if (includeModified) {
+      const modified = this.getModifiedInstance(event.id, occurrence.start);
+      if (modified) {
+        Object.assign(occurrence, modified);
+        occurrence.isModified = true;
+      }
+    }
+    return occurrence;
   }
 
   /**
@@ -573,28 +787,38 @@ export class RecurrenceEngineV2 {
    */
   findDSTTransitions(start, end, timezone) {
     const transitions = [];
-    const current = new Date(start);
+    const scan = { cursor: new Date(start), lastOffset: 0 };
+    scan.lastOffset = this.tzManager.getTimezoneOffset(scan.cursor, timezone);
+    this._scanDSTTransitions(scan, transitions, new Date(end).getTime(), timezone);
+    return transitions;
+  }
 
-    // Check each day for offset changes
-    let lastOffset = this.tzManager.getTimezoneOffset(current, timezone);
+  /**
+   * Walk the scan cursor one day at a time up to untilMs, appending each
+   * offset change. The cursor and last offset persist in `scan`, so the
+   * walk can be resumed later on the same day grid.
+   * @param {{ cursor: Date, lastOffset: number }} scan - Resumable scan position (mutated)
+   * @param {Array} transitions - Transition list to append to
+   * @param {number} untilMs - Scan through this timestamp (inclusive)
+   * @param {string} timezone - Timezone to probe
+   * @private
+   */
+  _scanDSTTransitions(scan, transitions, untilMs, timezone) {
+    while (scan.cursor.getTime() <= untilMs) {
+      const offset = this.tzManager.getTimezoneOffset(scan.cursor, timezone);
 
-    while (current <= end) {
-      const offset = this.tzManager.getTimezoneOffset(current, timezone);
-
-      if (offset !== lastOffset) {
+      if (offset !== scan.lastOffset) {
         transitions.push({
-          date: new Date(current),
-          oldOffset: lastOffset,
+          date: new Date(scan.cursor),
+          oldOffset: scan.lastOffset,
           newOffset: offset,
-          type: offset < lastOffset ? 'spring-forward' : 'fall-back'
+          type: offset < scan.lastOffset ? 'spring-forward' : 'fall-back'
         });
       }
 
-      lastOffset = offset;
-      current.setDate(current.getDate() + 1);
+      scan.lastOffset = offset;
+      scan.cursor.setDate(scan.cursor.getDate() + 1);
     }
-
-    return transitions;
   }
 
   /**
@@ -742,7 +966,16 @@ export class RecurrenceEngineV2 {
    * Clone occurrence results before returning or caching.
    */
   cloneOccurrences(occurrences) {
-    return occurrences.map(occurrence => ({
+    return occurrences.map(occurrence => this.cloneOccurrence(occurrence));
+  }
+
+  /**
+   * Clone a single occurrence, copying its Date and array fields.
+   * @param {import('../types.js').ExpandedOccurrence} occurrence - Occurrence to clone
+   * @returns {import('../types.js').ExpandedOccurrence} Independent copy
+   */
+  cloneOccurrence(occurrence) {
+    return {
       ...occurrence,
       start: occurrence.start ? new Date(occurrence.start) : occurrence.start,
       end: occurrence.end ? new Date(occurrence.end) : occurrence.end,
@@ -754,7 +987,7 @@ export class RecurrenceEngineV2 {
       categories: Array.isArray(occurrence.categories)
         ? [...occurrence.categories]
         : occurrence.categories
-    }));
+    };
   }
 
   /**

@@ -93,6 +93,335 @@ export class RecurrenceEngine {
   }
 
   /**
+   * Lazily iterate the occurrences of an event in chronological order.
+   *
+   * Yields the same occurrence objects, in the same order, that expandEvent
+   * returns for the window — but one at a time, so a caller can stop after
+   * any number of them without the rest of the series being generated.
+   * Daily, weekly and sub-daily rules are seeked to `after` arithmetically,
+   * so finding the first occurrence after a far-away instant does not step
+   * through the series from its start.
+   *
+   * Both bounds are exclusive unless `inclusive` is set: an occurrence that
+   * starts exactly at `after` or `before` is skipped by default, which lets
+   * `iterateOccurrences(event, { after: previous.start })` continue a series
+   * without repeating `previous`. With `inclusive: true` the window is
+   * closed on both ends, exactly like expandEvent's range. An omitted bound
+   * leaves that end of the window open.
+   *
+   * COUNT, UNTIL, INTERVAL, BYDAY/BYMONTHDAY/BYSETPOS and exception dates
+   * are honoured as in expandEvent; BYSETPOS rules are yielded one period at
+   * a time, since the set positions of a period are only known once it is
+   * complete. A non-recurring event yields its single occurrence when it
+   * falls inside the window. Iteration ends at COUNT or UNTIL, at `before`,
+   * or — as a guard for rules that produce no occurrences — after
+   * MAX_ITERATIONS_HARD_LIMIT consecutive steps without one.
+   *
+   * The generator is single-use; call this method again for a fresh one.
+   *
+   * @example
+   * for (const occurrence of RecurrenceEngine.iterateOccurrences(event, { after: new Date() })) {
+   *   if (occurrence.start > deadline) break;
+   *   schedule(occurrence);
+   * }
+   *
+   * @param {import('./Event.js').Event} event - The event to iterate
+   * @param {import('../types.js').OccurrenceIteratorOptions} [options={}] - Window and timezone
+   * @returns {Generator<import('../types.js').EventOccurrence, void, undefined>} Occurrences in chronological order
+   * @throws {TypeError} If `after` or `before` is not a valid Date or timestamp
+   */
+  static iterateOccurrences(event, options = {}) {
+    const window = this._occurrenceWindow(options);
+    if (!event.recurring || !event.recurrenceRule) {
+      return this._iterateSingle(
+        { start: event.start, end: event.end, timezone: event.timeZone },
+        window
+      );
+    }
+
+    const rule = this._getParsedRule(event.recurrenceRule);
+    let rangeEndMs = window.endMs;
+    // Same UNTIL clamp as expandEvent (a non-Date UNTIL compares false)
+    if (rule.until && rule.until < rangeEndMs) {
+      rangeEndMs = rule.until.valueOf();
+    }
+
+    let occurrences = this._iterateRule(
+      event,
+      rule,
+      window.startMs,
+      rangeEndMs,
+      options.timezone || event.timeZone || 'UTC',
+      TimezoneManager.getInstance(),
+      event.end - event.start
+    );
+    if (rule.bySetPos && rule.bySetPos.length > 0 && rule.freq !== 'MONTHLY') {
+      occurrences = this._iterateBySetPos(occurrences, rule);
+    }
+    return occurrences;
+  }
+
+  /**
+   * First occurrence of an event after an instant, or null when the series
+   * has no occurrence after it (past COUNT or UNTIL, or a non-recurring
+   * event that already started).
+   *
+   * `after` is exclusive unless `options.inclusive` is set, so passing the
+   * start of a known occurrence returns the one that follows it. Not to be
+   * confused with getNextOccurrence, which steps a parsed rule once
+   * without regard to COUNT, UNTIL or exceptions.
+   *
+   * @example
+   * const upcoming = RecurrenceEngine.nextOccurrence(event, new Date());
+   *
+   * @param {import('./Event.js').Event} event - The event to query
+   * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
+   * @param {import('../types.js').OccurrenceIteratorOptions} [options={}] - Further window options
+   * @returns {import('../types.js').EventOccurrence|null} The next occurrence, or null
+   */
+  static nextOccurrence(event, after = null, options = {}) {
+    for (const occurrence of this.iterateOccurrences(event, { ...options, after })) {
+      return occurrence;
+    }
+    return null;
+  }
+
+  /**
+   * The first `count` occurrences of an event inside a window, generated
+   * lazily so an open-ended series costs only the occurrences taken.
+   * `count` is capped at MAX_OCCURRENCES_HARD_LIMIT; fewer are returned
+   * when the series or the window ends first.
+   *
+   * @example
+   * const nextFive = RecurrenceEngine.takeOccurrences(event, 5, { after: new Date() });
+   *
+   * @param {import('./Event.js').Event} event - The event to query
+   * @param {number} count - Maximum number of occurrences to return
+   * @param {import('../types.js').OccurrenceIteratorOptions} [options={}] - Window and timezone
+   * @returns {import('../types.js').EventOccurrence[]} Up to `count` occurrences in chronological order
+   */
+  static takeOccurrences(event, count, options = {}) {
+    const limit = Math.min(count, RecurrenceEngine.MAX_OCCURRENCES_HARD_LIMIT);
+    const taken = [];
+    if (!(limit > 0)) {
+      return taken;
+    }
+    for (const occurrence of this.iterateOccurrences(event, options)) {
+      taken.push(occurrence);
+      if (taken.length >= limit) {
+        break;
+      }
+    }
+    return taken;
+  }
+
+  /**
+   * Resolve iterator options into a closed window on numeric timestamps.
+   * Exclusive bounds are shifted by one millisecond, the resolution of
+   * Date, so the expansion loops only ever compare inclusively.
+   * @param {import('../types.js').OccurrenceIteratorOptions} options - Iterator options
+   * @returns {{ startMs: number, endMs: number }} Inclusive bounds (infinite when open)
+   * @throws {TypeError} If a bound is not a valid Date or timestamp
+   * @private
+   */
+  static _occurrenceWindow(options) {
+    const { after = null, before = null, inclusive = false } = options;
+    const shift = inclusive ? 0 : 1;
+    return {
+      startMs: after == null ? -Infinity : this._boundMs(after, 'after') + shift,
+      endMs: before == null ? Infinity : this._boundMs(before, 'before') - shift
+    };
+  }
+
+  /**
+   * Timestamp of a window bound given as a Date or a number
+   * @param {Date|number} value - Bound to convert
+   * @param {string} name - Option name for the error message
+   * @returns {number} Timestamp in milliseconds
+   * @throws {TypeError} If the value is not a valid Date or timestamp
+   * @private
+   */
+  static _boundMs(value, name) {
+    const ms = value instanceof Date ? value.getTime() : typeof value === 'number' ? value : NaN;
+    if (Number.isNaN(ms)) {
+      throw new TypeError(`RecurrenceEngine: ${name} must be a valid Date or timestamp`);
+    }
+    return ms;
+  }
+
+  /**
+   * Yield a single occurrence if it starts inside the window
+   * @param {import('../types.js').EventOccurrence} occurrence - The occurrence
+   * @param {{ startMs: number, endMs: number }} window - Inclusive bounds
+   * @returns {Generator<import('../types.js').EventOccurrence, void, undefined>}
+   * @private
+   */
+  static *_iterateSingle(occurrence, window) {
+    const ms = new Date(occurrence.start).getTime();
+    if (ms >= window.startMs && ms <= window.endMs) {
+      yield occurrence;
+    }
+  }
+
+  /**
+   * Lazy counterpart of the expansion loops: seeks to the window, then
+   * advances a Date cursor per step and yields each in-window occurrence,
+   * applying the same DST adjustment and exception filtering.
+   * @private
+   */
+  static *_iterateRule(event, rule, rangeStartMs, rangeEndMs, eventTimezone, tzManager, duration) {
+    const currentDate = new Date(event.start);
+    let currentMs = currentDate.getTime();
+    if (Number.isNaN(currentMs) || rangeStartMs > rangeEndMs) {
+      return;
+    }
+    // Steps taken from DTSTART, which is what COUNT measures
+    let count = 0;
+    let lastOffset = tzManager.getTimezoneOffset(currentDate, eventTimezone);
+    const hasExceptions = !!(rule.exceptions && rule.exceptions.length > 0);
+
+    if (currentMs < rangeStartMs) {
+      const seek = this._seekToWindow(currentMs, currentDate.getDay(), rule, rangeStartMs);
+      if (seek) {
+        currentMs = seek.ms;
+        count = seek.steps;
+        currentDate.setTime(currentMs);
+      }
+    }
+
+    let stuckCount = 0;
+    let idleSteps = 0;
+    while (currentMs <= rangeEndMs) {
+      if (currentMs >= rangeStartMs) {
+        const occurrenceStart = new Date(currentMs);
+        const occurrenceEnd = new Date(currentMs + duration);
+
+        const currentOffset = tzManager.getTimezoneOffset(occurrenceStart, eventTimezone);
+        if (currentOffset !== lastOffset) {
+          const offsetDiff = lastOffset - currentOffset;
+          occurrenceStart.setMinutes(occurrenceStart.getMinutes() + offsetDiff);
+          occurrenceEnd.setMinutes(occurrenceEnd.getMinutes() + offsetDiff);
+        }
+        lastOffset = currentOffset;
+
+        if (!hasExceptions || !this.isException(occurrenceStart, rule, event.id)) {
+          idleSteps = 0;
+          yield {
+            start: occurrenceStart,
+            end: occurrenceEnd,
+            recurringEventId: event.id,
+            timezone: eventTimezone,
+            originalStart: event.start
+          };
+        }
+      }
+
+      if (rule.count && count + 1 >= rule.count) {
+        return;
+      }
+
+      this._advanceInPlace(currentDate, rule);
+      const previousMs = currentMs;
+      currentMs = currentDate.getTime();
+      count++;
+
+      if (currentMs === previousMs) {
+        stuckCount++;
+        if (stuckCount >= 3) {
+          console.warn('RecurrenceEngine: Date not advancing, breaking to prevent infinite loop');
+          return;
+        }
+      } else {
+        stuckCount = 0;
+      }
+
+      idleSteps++;
+      if (idleSteps >= RecurrenceEngine.MAX_ITERATIONS_HARD_LIMIT) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Seek the iteration cursor to the last occurrence before rangeStartMs
+   * using the same arithmetic as expandEvent. The system-transition scan
+   * is bounded by the target itself, so an open-ended window costs no
+   * more than a closed one.
+   * @param {number} fromMs - Cursor position (DTSTART)
+   * @param {number} weekday - Weekday of the cursor
+   * @param {Object} rule - Parsed recurrence rule
+   * @param {number} rangeStartMs - Seek target
+   * @returns {{ ms: number, steps: number }|null} New cursor, or null for rules that cannot seek
+   * @private
+   */
+  static _seekToWindow(fromMs, weekday, rule, rangeStartMs) {
+    const maxSteps = rule.count ? rule.count - 1 : Infinity;
+    if (rule.freq === 'WEEKLY' && rule.byDay && rule.byDay.length > 0) {
+      const daySet = rule._byDaySet || (rule._byDaySet = this._buildByDaySet(rule.byDay));
+      if (daySet.size === 0) {
+        return null;
+      }
+      rule._byDayDeltas = rule._byDayDeltas || this._buildByDayDeltas(daySet);
+      return this._seekWeekCycle(fromMs, weekday, rangeStartMs, rangeStartMs, rule, maxSteps);
+    }
+    const stepMs = this._seekStepMs(rule);
+    if (stepMs <= 0) {
+      return null;
+    }
+    return this._seekFixedStep(fromMs, rangeStartMs, rangeStartMs, stepMs, maxSteps, cursor =>
+      this._advanceInPlace(cursor, rule)
+    );
+  }
+
+  /**
+   * Milliseconds per _advanceInPlace step for every rule whose step is a
+   * fixed duration between system-timezone transitions: the sub-daily
+   * frequencies, DAILY and plain WEEKLY
+   * @param {Object} rule - Parsed recurrence rule
+   * @returns {number} Step length in milliseconds, or 0 when not fixed
+   * @private
+   */
+  static _seekStepMs(rule) {
+    const interval = rule.interval;
+    if (!Number.isInteger(interval) || interval <= 0) {
+      return 0;
+    }
+    if (rule.freq === 'DAILY') {
+      return interval * 86400000;
+    }
+    if (rule.freq === 'WEEKLY') {
+      return 7 * interval * 86400000;
+    }
+    return this._fixedStepMs(rule);
+  }
+
+  /**
+   * Streaming BYSETPOS filter: buffers the occurrences of one period and
+   * yields its selected positions once the next period begins. Periods
+   * arrive contiguously and in order, so the result matches _applyBySetPos.
+   * @param {Iterable<import('../types.js').EventOccurrence>} source - Occurrences in order
+   * @param {Object} rule - Rule with bySetPos
+   * @returns {Generator<import('../types.js').EventOccurrence, void, undefined>}
+   * @private
+   */
+  static *_iterateBySetPos(source, rule) {
+    let key = null;
+    let group = [];
+    for (const occurrence of source) {
+      const occurrenceKey = this._bySetPosKey(occurrence, rule);
+      if (occurrenceKey !== key && group.length > 0) {
+        yield* this._selectBySetPos(group, rule).sort((a, b) => a.start - b.start);
+        group = [];
+      }
+      key = occurrenceKey;
+      group.push(occurrence);
+    }
+    if (group.length > 0) {
+      yield* this._selectBySetPos(group, rule).sort((a, b) => a.start - b.start);
+    }
+  }
+
+  /**
    * General expansion loop: advances a Date cursor per step. Handles every
    * frequency and degenerate rules (non-advancing dates, invalid intervals).
    * @private
@@ -564,17 +893,7 @@ export class RecurrenceEngine {
     // Group occurrences by period
     const groups = new Map();
     for (const occ of occurrences) {
-      let key;
-      switch (rule.freq) {
-        case 'YEARLY':
-          key = occ.start.getFullYear();
-          break;
-        case 'WEEKLY':
-          key = `${occ.start.getFullYear()}-W${DateUtils.getWeekNumber(occ.start)}`;
-          break;
-        default:
-          key = `${occ.start.getFullYear()}-${occ.start.getMonth()}`;
-      }
+      const key = this._bySetPosKey(occ, rule);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(occ);
     }
@@ -582,15 +901,47 @@ export class RecurrenceEngine {
     // Filter each group by BYSETPOS positions
     const filtered = [];
     for (const group of groups.values()) {
-      for (const pos of rule.bySetPos) {
-        const idx = pos > 0 ? pos - 1 : group.length + pos;
-        if (idx >= 0 && idx < group.length) {
-          filtered.push(group[idx]);
-        }
-      }
+      filtered.push(...this._selectBySetPos(group, rule));
     }
 
     return filtered.sort((a, b) => a.start - b.start);
+  }
+
+  /**
+   * Key of the BYSETPOS period an occurrence belongs to
+   * @param {import('../types.js').EventOccurrence} occurrence - The occurrence
+   * @param {Object} rule - Recurrence rule
+   * @returns {string|number} Period key
+   * @private
+   */
+  static _bySetPosKey(occurrence, rule) {
+    switch (rule.freq) {
+      case 'YEARLY':
+        return occurrence.start.getFullYear();
+      case 'WEEKLY':
+        return `${occurrence.start.getFullYear()}-W${DateUtils.getWeekNumber(occurrence.start)}`;
+      default:
+        return `${occurrence.start.getFullYear()}-${occurrence.start.getMonth()}`;
+    }
+  }
+
+  /**
+   * Occurrences of one period selected by the rule's BYSETPOS positions,
+   * in BYSETPOS order
+   * @param {Array} group - Occurrences of a single period, in order
+   * @param {Object} rule - Rule with bySetPos
+   * @returns {Array} Selected occurrences
+   * @private
+   */
+  static _selectBySetPos(group, rule) {
+    const selected = [];
+    for (const pos of rule.bySetPos) {
+      const idx = pos > 0 ? pos - 1 : group.length + pos;
+      if (idx >= 0 && idx < group.length) {
+        selected.push(group[idx]);
+      }
+    }
+    return selected;
   }
 
   /**

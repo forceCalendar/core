@@ -854,6 +854,90 @@ export class EventStore {
   }
 
   /**
+   * Lazily iterate the occurrences of a stored event in chronological order.
+   *
+   * Occurrences come one at a time from the store's recurrence engine
+   * (RecurrenceEngineV2 by default), so taking the next few occurrences of
+   * an open-ended series does not expand the series. `after` and `before`
+   * are exclusive unless `inclusive` is set; see
+   * RecurrenceEngineV2.iterateOccurrences for the full semantics. The
+   * expansion timezone defaults to the event's, then the store's.
+   *
+   * @example
+   * for (const occurrence of store.iterateOccurrences('standup', { after: new Date() })) {
+   *   if (occurrence.start > deadline) break;
+   *   remind(occurrence);
+   * }
+   *
+   * @param {string} eventId - The event ID
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>} Occurrences in chronological order
+   * @throws {Error} If no event with the ID exists
+   */
+  iterateOccurrences(eventId, options = {}) {
+    const query = this._occurrenceQuery(eventId, options);
+    return this.recurrenceEngine.iterateOccurrences(query.event, query.options);
+  }
+
+  /**
+   * First occurrence of a stored event after an instant, or null when the
+   * series has no occurrence after it. `after` is exclusive unless
+   * `options.inclusive` is set.
+   *
+   * @example
+   * const upcoming = store.getNextOccurrence('standup', new Date());
+   *
+   * @param {string} eventId - The event ID
+   * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Further options
+   * @returns {import('../types.js').ExpandedOccurrence|null} The next occurrence, or null
+   * @throws {Error} If no event with the ID exists
+   */
+  getNextOccurrence(eventId, after = null, options = {}) {
+    const query = this._occurrenceQuery(eventId, options);
+    return this.recurrenceEngine.nextOccurrence(query.event, after, query.options);
+  }
+
+  /**
+   * The first `count` occurrences of a stored event inside a window,
+   * generated lazily. `count` is capped at the engine's
+   * MAX_OCCURRENCES_HARD_LIMIT.
+   *
+   * @example
+   * const nextFive = store.takeOccurrences('standup', 5, { after: new Date() });
+   *
+   * @param {string} eventId - The event ID
+   * @param {number} count - Maximum number of occurrences to return
+   * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
+   * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
+   * @throws {Error} If no event with the ID exists
+   */
+  takeOccurrences(eventId, count, options = {}) {
+    const query = this._occurrenceQuery(eventId, options);
+    return this.recurrenceEngine.takeOccurrences(query.event, count, query.options);
+  }
+
+  /**
+   * Resolve an occurrence query to the stored event and its options, with
+   * the timezone defaulted as expandRecurringEvent does
+   * @param {string} eventId - The event ID
+   * @param {Object} options - Caller options
+   * @returns {{ event: Event, options: Object }}
+   * @throws {Error} If no event with the ID exists
+   * @private
+   */
+  _occurrenceQuery(eventId, options) {
+    const event = this.events.get(eventId);
+    if (!event) {
+      throw new Error(`Event with id ${eventId} not found`);
+    }
+    return {
+      event,
+      options: { ...options, timezone: options.timezone || event.timeZone || this.defaultTimezone }
+    };
+  }
+
+  /**
    * Clear all events
    */
   clear() {
