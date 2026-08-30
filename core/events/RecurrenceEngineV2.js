@@ -234,12 +234,12 @@ export class RecurrenceEngineV2 {
    * const nextFive = engine.takeOccurrences(event, 5, { after: new Date() });
    *
    * @param {import('./Event.js').Event} event - The event to query
-   * @param {number} count - Maximum number of occurrences to return
+   * @param {number} count - Maximum number of occurrences to return (fractions are floored)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
    * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
    */
   takeOccurrences(event, count, options = {}) {
-    const limit = Math.min(count, RecurrenceEngineV2.MAX_OCCURRENCES_HARD_LIMIT);
+    const limit = Math.floor(Math.min(count, RecurrenceEngineV2.MAX_OCCURRENCES_HARD_LIMIT));
     const taken = [];
     if (!(limit > 0)) {
       return taken;

@@ -747,10 +747,15 @@ export class Event {
    * @param {string} recurringEventId - Id of the recurring master event
    * @param {Date|number|string} occurrenceStart - Start of the occurrence
    * @returns {string} Occurrence id
+   * @throws {TypeError} If occurrenceStart is not a valid date
    */
   static occurrenceId(recurringEventId, occurrenceStart) {
     const start = occurrenceStart instanceof Date ? occurrenceStart : new Date(occurrenceStart);
-    return `${recurringEventId}_${start.getTime()}`;
+    const startMs = start.getTime();
+    if (Number.isNaN(startMs)) {
+      throw new TypeError('Event.occurrenceId: occurrenceStart must be a valid Date or timestamp');
+    }
+    return `${recurringEventId}_${startMs}`;
   }
 
   /**

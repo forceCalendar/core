@@ -172,9 +172,12 @@ assert(calendar.eventStore.getEvent(standupOcc.id) === calendar.eventStore.getEv
 assert(calendar.getEvent('single_1750000000000') === null, 'Occurrence-shaped id of a non-recurring event does not resolve');
 assert(calendar.getEvent('ghost_1750000000000') === null && calendar.getEvent('standup_x') === null, 'Unknown ids still return null');
 let selected = null;
-calendar.on('eventSelect', ({ event }) => { selected = event; });
+calendar.on('eventSelect', payload => { selected = payload; });
 calendar.selectEvent(standupOcc.id);
-assert(selected?.id === 'standup' && calendar.state.get('selectedEventId') === standupOcc.id, 'selectEvent accepts an occurrence id');
+assert(
+    selected?.event.id === 'standup' && selected.occurrenceId === standupOcc.id && calendar.state.get('selectedEventId') === 'standup',
+    'selectEvent accepts an occurrence id and selects its master'
+);
 
 console.log('\n=== Test 7: Update and remove through an occurrence id ===');
 let updatePayload = null;

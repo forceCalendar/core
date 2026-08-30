@@ -270,6 +270,60 @@ export class EventStore {
   }
 
   /**
+   * Resolve an id taken from anywhere (store, view data, a drag or click
+   * handler) to the id of the stored event it refers to.
+   *
+   * Returns the id itself for a stored event, the master's id for an
+   * occurrence id (see {@link Event.occurrenceId}) whose master is a stored
+   * recurring event, and `null` when nothing stored matches. This is the
+   * same resolution {@link EventStore#getEvent}, updateEvent and removeEvent
+   * apply, exposed for consumers that only need the id.
+   *
+   * @example
+   * const masterId = store.resolveEventId(chip.dataset.eventId); // 'standup' for 'standup_1750028400000'
+   *
+   * @param {string} id - Event id or occurrence id
+   * @returns {string|null} Id of the stored event, or null
+   */
+  resolveEventId(id) {
+    const event = this.getEvent(id);
+    return event ? event.id : null;
+  }
+
+  /**
+   * Get the occurrence an occurrence id stands for, as an {@link Event}
+   * exactly like the ones {@link EventStore#expandRecurringEvent} returns.
+   *
+   * Returns `null` when the id is not an occurrence id, its master is not a
+   * stored recurring event, or the series has no occurrence starting at the
+   * encoded instant. A master id is never an occurrence, so it yields null
+   * too; use {@link EventStore#getEvent} for the master.
+   *
+   * @example
+   * const occurrence = store.getOccurrence('standup_1750028400000');
+   *
+   * @param {string} occurrenceId - Occurrence id (`<masterId>_<startMs>`)
+   * @param {string} [timezone] - Timezone for the expansion (defaults to the store timezone)
+   * @returns {Event|null} The occurrence, or null
+   */
+  getOccurrence(occurrenceId, timezone = null) {
+    const parsed = Event.parseOccurrenceId(occurrenceId);
+    const master = parsed ? this._resolveOccurrenceMaster(occurrenceId) : null;
+    if (!master || Number.isNaN(parsed.occurrenceStart.getTime())) {
+      return null;
+    }
+    // A DST adjustment can move an occurrence away from the stepped
+    // instant, so expand a day either side and match on the id
+    const occurrences = this.expandRecurringEvent(
+      master,
+      DateUtils.addDays(parsed.occurrenceStart, -1),
+      DateUtils.addDays(parsed.occurrenceStart, 1),
+      timezone
+    );
+    return occurrences.find(occurrence => occurrence.id === occurrenceId) || null;
+  }
+
+  /**
    * Get all events
    * @returns {Event[]} Array of all events
    */
@@ -900,7 +954,7 @@ export class EventStore {
    *   remind(occurrence);
    * }
    *
-   * @param {string} eventId - The event ID
+   * @param {string} eventId - Event id or occurrence id (resolved to its master)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
    * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>} Occurrences in chronological order
    * @throws {Error} If no event with the ID exists
@@ -918,7 +972,7 @@ export class EventStore {
    * @example
    * const upcoming = store.getNextOccurrence('standup', new Date());
    *
-   * @param {string} eventId - The event ID
+   * @param {string} eventId - Event id or occurrence id (resolved to its master)
    * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Further options
    * @returns {import('../types.js').ExpandedOccurrence|null} The next occurrence, or null
@@ -937,8 +991,8 @@ export class EventStore {
    * @example
    * const nextFive = store.takeOccurrences('standup', 5, { after: new Date() });
    *
-   * @param {string} eventId - The event ID
-   * @param {number} count - Maximum number of occurrences to return
+   * @param {string} eventId - Event id or occurrence id (resolved to its master)
+   * @param {number} count - Maximum number of occurrences to return (fractions are floored)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
    * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
    * @throws {Error} If no event with the ID exists
@@ -958,7 +1012,8 @@ export class EventStore {
    * @private
    */
   _occurrenceQuery(eventId, options) {
-    const event = this.events.get(eventId);
+    // Occurrence ids resolve to their master, as in getEvent
+    const event = this.getEvent(eventId);
     if (!event) {
       throw new Error(`Event with id ${eventId} not found`);
     }
@@ -1014,6 +1069,12 @@ export class EventStore {
    * - adds events whose id is not in the store (`add` change),
    * - removes stored events missing from the snapshot (`remove` change),
    *   unless `removeMissing` is `false`,
+   * - treats occurrences of a recurring series (entries with
+   *   `isOccurrence: true`, the plain object of such an occurrence, or an id
+   *   that {@link EventStore#getEvent} resolves to a stored recurring master)
+   *   as a reference to their master: the master is kept as unchanged and is
+   *   never replaced by an occurrence. An occurrence whose master is neither
+   *   stored nor in the snapshot is an error,
    * - emits a single `batch` notification listing those changes, or nothing at
    *   all when the snapshot matches the store. When called while a batch is
    *   already open the changes are queued on that batch instead.
@@ -1046,12 +1107,34 @@ export class EventStore {
       // Normalize and validate everything before touching the store
       /** @type {Map<string, Event>} */
       const incoming = new Map();
+      const occurrenceRefs = [];
       for (const eventData of events) {
+        const masterId = this._occurrenceMasterId(eventData);
+        if (masterId !== null) {
+          occurrenceRefs.push({ id: eventData.id, masterId });
+          continue;
+        }
         const event = eventData instanceof Event ? eventData : new Event(eventData);
         if (incoming.has(event.id)) {
           throw new Error(`Duplicate event id in reconcile input: ${event.id}`);
         }
         incoming.set(event.id, event);
+      }
+
+      // Stored masters that occurrence entries stand for: kept, not compared
+      /** @type {Set<string>} */
+      const retained = new Set();
+      for (const { id, masterId } of occurrenceRefs) {
+        if (incoming.has(masterId)) {
+          continue; // the master itself is in the snapshot
+        }
+        const stored = this.events.get(masterId);
+        if (!stored || !stored.recurring) {
+          throw new Error(
+            `Occurrence ${id} in reconcile input refers to recurring event ${masterId}, which is neither stored nor in the snapshot`
+          );
+        }
+        retained.add(masterId);
       }
 
       /** @type {import('../types.js').ReconcileResult} */
@@ -1066,12 +1149,16 @@ export class EventStore {
       try {
         if (removeMissing) {
           for (const existing of Array.from(this.events.values())) {
-            if (!incoming.has(existing.id)) {
+            if (!incoming.has(existing.id) && !retained.has(existing.id)) {
               this._detachEvent(existing);
               this._queueChange({ type: 'remove', event: existing, version: ++this.version });
               result.removed.push(existing);
             }
           }
+        }
+
+        for (const masterId of retained) {
+          result.unchanged.push(this.events.get(masterId));
         }
 
         for (const event of incoming.values()) {
@@ -1114,6 +1201,44 @@ export class EventStore {
 
       return result;
     });
+  }
+
+  /**
+   * Id of the recurring master a reconcile entry is an occurrence of, or
+   * null when the entry is an event in its own right. Recognises Event
+   * occurrences (isOccurrence), their toObject() form (occurrence markers
+   * in metadata) and ids that resolve to a stored recurring master.
+   * @param {Event|import('../types.js').EventData} eventData - Reconcile entry
+   * @returns {string|null} Master id or null
+   * @private
+   */
+  _occurrenceMasterId(eventData) {
+    if (!eventData || typeof eventData !== 'object') {
+      return null; // let the Event constructor report it
+    }
+    const parsed = Event.parseOccurrenceId(eventData.id);
+    if (eventData.isOccurrence === true) {
+      if (typeof eventData.recurringEventId === 'string' && eventData.recurringEventId) {
+        return eventData.recurringEventId;
+      }
+      if (parsed) {
+        return parsed.recurringEventId;
+      }
+      throw new Error(
+        `Occurrence ${eventData.id} in reconcile input has no recurringEventId and no occurrence id`
+      );
+    }
+    const metadata = eventData.metadata;
+    if (
+      metadata &&
+      typeof metadata === 'object' &&
+      typeof metadata.recurringEventId === 'string' &&
+      metadata.occurrenceId === eventData.id
+    ) {
+      return metadata.recurringEventId;
+    }
+    const master = parsed ? this._resolveOccurrenceMaster(eventData.id) : null;
+    return master ? master.id : null;
   }
 
   /**

@@ -325,6 +325,15 @@
  */
 
 /**
+ * Payload of the Calendar `eventSelect` event
+ * @typedef {Object} EventSelectPayload
+ * @property {import('./events/Event.js').Event} event - The stored event (the master for an occurrence id)
+ * @property {string} eventId - Id of the stored event, as kept in the state's selectedEventId
+ * @property {string|null} occurrenceId - The occurrence id that was selected, or null for a stored event's id
+ * @property {import('./events/Event.js').Event|null} occurrence - The selected occurrence as in view data, or null
+ */
+
+/**
  * @typedef {Object} QueryFilters
  * @property {Date} [start] - Start date for range query
  * @property {Date} [end] - End date for range query

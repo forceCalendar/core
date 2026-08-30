@@ -236,6 +236,35 @@ export class Calendar {
   }
 
   /**
+   * Resolve an event id or occurrence id to the id of the stored event it
+   * refers to: the id itself for a stored event, the master's id for an
+   * occurrence id taken from view data, `null` when nothing stored matches.
+   * See `EventStore.resolveEventId`.
+   *
+   * @example
+   * calendar.resolveEventId('standup_1750028400000'); // 'standup'
+   * calendar.resolveEventId('unknown'); // null
+   *
+   * @param {string} id - Event id or occurrence id
+   * @returns {string|null} Id of the stored event, or null
+   */
+  resolveEventId(id) {
+    return this.eventStore.resolveEventId(id);
+  }
+
+  /**
+   * Get the occurrence an occurrence id from view data stands for, as an
+   * {@link Event} like the ones the views hold, or `null` when the id is
+   * not an occurrence of a stored recurring series. See
+   * `EventStore.getOccurrence`.
+   * @param {string} occurrenceId - Occurrence id (`<masterId>_<startMs>`)
+   * @returns {Event|null} The occurrence, or null
+   */
+  getOccurrence(occurrenceId) {
+    return this.eventStore.getOccurrence(occurrenceId, this.config.timeZone);
+  }
+
+  /**
    * Get all stored events (recurring masters, never their occurrences)
    * @returns {Event[]}
    */
@@ -269,13 +298,14 @@ export class Calendar {
     if (options.reconcile) {
       return this.reconcileEvents(events, options);
     }
+    this._assertIterable(events, 'setEvents');
 
     const removed = this.getEvents();
     this.eventStore.loadEvents(events);
     const added = this.getEvents();
 
     /** @type {import('../types.js').EventsSetPayload} */
-    const payload = { events: added, added, updated: [], removed, unchanged: [] };
+    const payload = { events: this.getEvents(), added, updated: [], removed, unchanged: [] };
     this._emit('eventsSet', payload);
     return payload;
   }
@@ -305,9 +335,10 @@ export class Calendar {
    * @param {Array<import('../events/Event.js').Event|import('../types.js').EventData>} events - Complete snapshot of events
    * @param {import('../types.js').ReconcileOptions} [options={}] - Reconcile options
    * @returns {import('../types.js').EventsSetPayload} Resulting events and the applied change set
-   * @throws {Error} If an entry fails validation or two entries share an id
+   * @throws {Error} If `events` is not iterable, an entry fails validation or two entries share an id
    */
   reconcileEvents(events, options = {}) {
+    this._assertIterable(events, 'reconcileEvents');
     const { removeMissing, isEquivalent } = options;
     const prepared = [];
     for (const eventData of events) {
@@ -328,6 +359,18 @@ export class Calendar {
     const payload = { events: this.getEvents(), ...result };
     this._emit('eventsSet', payload);
     return payload;
+  }
+
+  /**
+   * Throw a clear error when a snapshot is not iterable
+   * @param {*} events - Candidate snapshot
+   * @param {string} method - Calling method, for the message
+   * @private
+   */
+  _assertIterable(events, method) {
+    if (!events || typeof events[Symbol.iterator] !== 'function') {
+      throw new Error(`${method}() expects an iterable of events`);
+    }
   }
 
   /**
@@ -402,7 +445,7 @@ export class Calendar {
    *   remind(occurrence);
    * }
    *
-   * @param {string} eventId - The event ID
+   * @param {string} eventId - Event id or occurrence id (resolved to its master)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
    * @returns {Generator<import('../types.js').ExpandedOccurrence, void, undefined>} Occurrences in chronological order
    * @throws {Error} If no event with the ID exists
@@ -419,7 +462,7 @@ export class Calendar {
    * @example
    * const upcoming = calendar.getNextOccurrence('standup', new Date());
    *
-   * @param {string} eventId - The event ID
+   * @param {string} eventId - Event id or occurrence id (resolved to its master)
    * @param {Date|number} [after=null] - Instant to search from (defaults to the series start)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Further options
    * @returns {import('../types.js').ExpandedOccurrence|null} The next occurrence, or null
@@ -436,8 +479,8 @@ export class Calendar {
    * @example
    * const nextFive = calendar.takeOccurrences('standup', 5, { after: new Date() });
    *
-   * @param {string} eventId - The event ID
-   * @param {number} count - Maximum number of occurrences to return
+   * @param {string} eventId - Event id or occurrence id (resolved to its master)
+   * @param {number} count - Maximum number of occurrences to return (fractions are floored)
    * @param {import('../types.js').ExpandedOccurrenceIteratorOptions} [options={}] - Window and expansion options
    * @returns {import('../types.js').ExpandedOccurrence[]} Up to `count` occurrences in chronological order
    * @throws {Error} If no event with the ID exists
@@ -797,14 +840,37 @@ export class Calendar {
 
   /**
    * Select an event
-   * @param {string} eventId - Event ID to select
+   *
+   * Accepts a stored event's id or an occurrence id taken from view data
+   * (see {@link Event.occurrenceId}). Either way the stored event is what
+   * gets selected: `selectedEventId` in the state holds its id, so it can
+   * always be looked up with {@link Calendar#getEvent}. The `eventSelect`
+   * payload carries the stored `event`, its `eventId`, and for an
+   * occurrence id also `occurrenceId` and the `occurrence` itself (an
+   * {@link Event} as in view data, or null when the series has no
+   * occurrence at that instant). Nothing happens for an unknown id.
+   *
+   * @example
+   * calendar.on('eventSelect', ({ event, occurrence }) => open(occurrence || event));
+   * calendar.selectEvent(chip.dataset.eventId);
+   *
+   * @param {string} eventId - Event id or occurrence id to select
    */
   selectEvent(eventId) {
     const event = this.getEvent(eventId);
-    if (event) {
-      this.state.selectEvent(eventId);
-      this._emit('eventSelect', { event });
+    if (!event) {
+      return;
     }
+    const isOccurrence = eventId !== event.id;
+    this.state.selectEvent(event.id);
+    /** @type {import('../types.js').EventSelectPayload} */
+    const payload = {
+      event,
+      eventId: event.id,
+      occurrenceId: isOccurrence ? eventId : null,
+      occurrence: isOccurrence ? this.getOccurrence(eventId) : null
+    };
+    this._emit('eventSelect', payload);
   }
 
   /**
