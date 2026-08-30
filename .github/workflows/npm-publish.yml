@@ -156,6 +156,20 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Refresh website release banner
+      if: steps.check_version.outputs.exists == 'false'
+      env:
+        WWW_REVALIDATE_TOKEN: ${{ secrets.WWW_REVALIDATE_TOKEN }}
+      run: |
+        if [ -z "$WWW_REVALIDATE_TOKEN" ]; then
+          echo "WWW_REVALIDATE_TOKEN not set; skipping banner refresh"
+          exit 0
+        fi
+        curl --fail -sS -X POST \
+          -H "Authorization: Bearer $WWW_REVALIDATE_TOKEN" \
+          https://www.forcecalendar.org/api/revalidate
+      continue-on-error: true
+
     - name: Trigger benchmark workflow
       if: steps.check_version.outputs.exists == 'false'
       run: |
