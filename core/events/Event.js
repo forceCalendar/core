@@ -721,6 +721,14 @@ export class Event {
    * describe the same event. Two events with different ids are never
    * equivalent.
    *
+   * Two things to know when building snapshots for `reconcile()`:
+   * - `attendees`, `reminders`, `categories` and `attachments` are compared
+   *   in order, so the same attendees listed in a different order count as
+   *   a change.
+   * - Only the top-level dates are normalized. Values inside `metadata` are
+   *   compared as given, so a `Date` and its ISO string are not equivalent
+   *   there; keep metadata in one representation.
+   *
    * This is the default comparator used by `EventStore.reconcile()` to decide
    * whether an incoming snapshot entry replaces the stored event.
    *

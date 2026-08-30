@@ -1079,9 +1079,13 @@ export class EventStore {
    *   all when the snapshot matches the store. When called while a batch is
    *   already open the changes are queued on that batch instead.
    *
-   * Input is validated up front: invalid event data or duplicate ids throw
-   * before the store is modified. Any error raised while applying the diff
-   * rolls the store back to its previous state.
+   * Input is validated up front: invalid event data, duplicate ids and
+   * occurrences without a master throw before the store is modified. When
+   * reconcile opens the batch itself, any error raised while applying the
+   * diff rolls the store back to its previous state; inside a batch opened
+   * by the caller the changes applied so far stay queued on that batch, and
+   * it is the caller's rollbackBatch() that undoes them (a custom
+   * `isEquivalent` that throws is the usual way to get there).
    *
    * @example
    * // periodic server snapshot
@@ -1482,10 +1486,6 @@ export class EventStore {
   }
 
   /**
-   * Notify listeners of changes
-   * @private
-   */
-  /**
    * Deliver a change now, or queue it when a batch is open
    * @param {import('../types.js').EventStoreChange} change - Change to deliver
    * @private
@@ -1498,6 +1498,12 @@ export class EventStore {
     }
   }
 
+  /**
+   * Deliver a change to every subscriber now, regardless of batch mode.
+   * A listener that throws is reported and does not stop the others.
+   * @param {import('../types.js').EventStoreChange} change - Change to deliver
+   * @private
+   */
   _notifyChange(change) {
     for (const listener of this.listeners) {
       try {
