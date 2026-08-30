@@ -59,6 +59,8 @@ jobs:
 
     - name: Determine and Bump Version
       id: version_bump
+      env:
+        HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
       run: |
         PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
 
@@ -80,7 +82,7 @@ jobs:
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
           BUMP_TYPE="${{ github.event.inputs.bump }}"
         else
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          COMMIT_MSG="$HEAD_COMMIT_MESSAGE"
 
           # Check for explicit version keywords in commit message
           if echo "$COMMIT_MSG" | grep -qiE '\[major\]|BREAKING CHANGE|!:'; then
