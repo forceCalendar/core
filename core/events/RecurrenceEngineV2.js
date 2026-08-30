@@ -615,15 +615,17 @@ export class RecurrenceEngineV2 {
         // Found a day in current month
         next.setDate(targetDay);
       } else {
-        // Move to next month
-        next.setMonth(next.getMonth() + rule.interval);
-
-        // Handle negative days (from end of month)
         targetDay = targetDays[0];
         if (targetDay < 0) {
+          // Counted from the end of the month (-1 is the last day). Move to
+          // the first so the month step cannot overflow from a 31st.
+          next.setDate(1);
+          next.setMonth(next.getMonth() + rule.interval);
           const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-          next.setDate(lastDay + targetDay + 1);
+          next.setDate(Math.max(1, lastDay + targetDay + 1));
         } else {
+          // Move to next month
+          next.setMonth(next.getMonth() + rule.interval);
           next.setDate(targetDay);
         }
       }

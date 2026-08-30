@@ -918,8 +918,14 @@ export class RecurrenceEngine {
     switch (rule.freq) {
       case 'YEARLY':
         return occurrence.start.getFullYear();
-      case 'WEEKLY':
-        return `${occurrence.start.getFullYear()}-W${DateUtils.getWeekNumber(occurrence.start)}`;
+      case 'WEEKLY': {
+        // ISO week-year: the week's Thursday decides the year, so the days
+        // of a week that straddles New Year share one period key
+        const thursday = new Date(occurrence.start);
+        thursday.setHours(0, 0, 0, 0);
+        thursday.setDate(thursday.getDate() + 4 - (thursday.getDay() || 7));
+        return `${thursday.getFullYear()}-W${DateUtils.getWeekNumber(occurrence.start)}`;
+      }
       default:
         return `${occurrence.start.getFullYear()}-${occurrence.start.getMonth()}`;
     }
@@ -1037,11 +1043,21 @@ export class RecurrenceEngine {
       case 'MONTHLY':
         if (rule.byMonthDay && rule.byMonthDay.length > 0) {
           // Specific day(s) of month
-          const currentMonth = next.getMonth();
-          next.setMonth(currentMonth + rule.interval);
-          // Clamp to last day of month if day doesn't exist
-          const daysInMonth = this._daysInMonth(next.getFullYear(), next.getMonth());
-          next.setDate(Math.min(rule.byMonthDay[0], daysInMonth));
+          const monthDay = rule.byMonthDay[0];
+          if (monthDay < 0) {
+            // Counted from the end of the month (-1 is the last day). Move
+            // to the first so the month step cannot overflow from a 31st.
+            next.setDate(1);
+            next.setMonth(next.getMonth() + rule.interval);
+            const daysInMonth = this._daysInMonth(next.getFullYear(), next.getMonth());
+            next.setDate(Math.max(1, daysInMonth + monthDay + 1));
+          } else {
+            const currentMonth = next.getMonth();
+            next.setMonth(currentMonth + rule.interval);
+            // Clamp to last day of month if day doesn't exist
+            const daysInMonth = this._daysInMonth(next.getFullYear(), next.getMonth());
+            next.setDate(Math.min(monthDay, daysInMonth));
+          }
         } else if (rule.byDay && rule.byDay.length > 0) {
           // Specific weekday of month (e.g., "2nd Tuesday")
           next.setMonth(next.getMonth() + rule.interval);
