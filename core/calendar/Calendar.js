@@ -178,9 +178,12 @@ export class Calendar {
 
   /**
    * Update an event
-   * @param {string} eventId - The event ID
+   *
+   * An occurrence id taken from view data (see {@link Event.occurrenceId})
+   * updates the recurring master, i.e. the whole series.
+   * @param {string} eventId - Event id or occurrence id
    * @param {Object} updates - Properties to update
-   * @returns {Event} The updated event
+   * @returns {Event} The updated event (the master for an occurrence id)
    */
   updateEvent(eventId, updates) {
     const oldEvent = this.eventStore.getEvent(eventId);
@@ -193,7 +196,10 @@ export class Calendar {
 
   /**
    * Remove an event
-   * @param {string} eventId - The event ID
+   *
+   * An occurrence id taken from view data (see {@link Event.occurrenceId})
+   * removes the recurring master, i.e. the whole series.
+   * @param {string} eventId - Event id or occurrence id
    * @returns {boolean} True if removed
    */
   removeEvent(eventId) {
@@ -218,15 +224,19 @@ export class Calendar {
 
   /**
    * Get an event by ID
-   * @param {string} eventId - The event ID
-   * @returns {Event|null}
+   *
+   * Occurrence ids taken from view data (`<masterId>_<startMs>`, see
+   * {@link Event.occurrenceId}) resolve to the stored recurring master, so
+   * every id a renderer hands back can be looked up here.
+   * @param {string} eventId - Event id or occurrence id
+   * @returns {Event|null} The stored event (the master for an occurrence id) or null
    */
   getEvent(eventId) {
     return this.eventStore.getEvent(eventId);
   }
 
   /**
-   * Get all events
+   * Get all stored events (recurring masters, never their occurrences)
    * @returns {Event[]}
    */
   getEvents() {
@@ -344,13 +354,27 @@ export class Calendar {
   }
 
   /**
-   * Get events for a specific date
+   * Get events for a specific date, with recurring series expanded into occurrences
    * @param {Date} date - The date
    * @param {string} [timezone] - Timezone for the query (defaults to calendar timezone)
    * @returns {Event[]}
    */
   getEventsForDate(date, timezone = null) {
     return this.eventStore.getEventsForDate(date, timezone || this.config.timeZone);
+  }
+
+  /**
+   * Get the events for every day in a range, keyed by local date (YYYY-MM-DD)
+   *
+   * Recurring series are expanded once for the whole range; this is what the
+   * month and week views use. See `EventStore.getEventsByDate`.
+   * @param {Date} start - First day of the range
+   * @param {Date} end - Last day of the range
+   * @param {string} [timezone] - Timezone for the query (defaults to calendar timezone)
+   * @returns {Map<string, Event[]>} Local date string -> events on that day
+   */
+  getEventsByDate(start, end, timezone = null) {
+    return this.eventStore.getEventsByDate(start, end, timezone || this.config.timeZone);
   }
 
   /**
@@ -529,6 +553,12 @@ export class Calendar {
       ? 6
       : Math.ceil((lastDay.getDate() + DateUtils.getDayOfWeek(firstDay, weekStartsOn)) / 7);
 
+    // Expand recurring series once for the whole grid, not once per cell
+    const eventsByDate = this.getEventsByDate(
+      startDate,
+      DateUtils.addDays(startDate, maxWeeks * 7 - 1)
+    );
+
     for (let weekIndex = 0; weekIndex < maxWeeks; weekIndex++) {
       const week = {
         weekNumber: DateUtils.getWeekNumber(currentDate),
@@ -547,7 +577,7 @@ export class Calendar {
           isCurrentMonth,
           isToday,
           isWeekend,
-          events: this.getEventsForDate(dayDate)
+          events: eventsByDate.get(DateUtils.getLocalDateString(dayDate)) || []
         });
 
         // Use DateUtils.addDays to handle month boundaries correctly
@@ -580,8 +610,12 @@ export class Calendar {
     const days = [];
     const currentDate = new Date(startDate);
 
+    // Expand recurring series once for the whole week, not once per day
+    const eventsByDate = this.getEventsByDate(startDate, endDate);
+
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(currentDate);
+      const events = eventsByDate.get(DateUtils.getLocalDateString(dayDate)) || [];
       days.push({
         date: dayDate,
         dayOfMonth: dayDate.getDate(),
@@ -589,9 +623,9 @@ export class Calendar {
         dayName: DateUtils.getDayName(dayDate, this.state.get('locale')),
         isToday: DateUtils.isToday(dayDate),
         isWeekend: dayDate.getDay() === 0 || dayDate.getDay() === 6,
-        events: this.getEventsForDate(dayDate),
+        events,
         // Add overlap groups for positioning overlapping events
-        overlapGroups: this.eventStore.getOverlapGroups(dayDate, true),
+        overlapGroups: this.eventStore.groupOverlappingEvents(events, true),
         getEventPositions: events => this.eventStore.calculateEventPositions(events)
       });
       // Move to next day

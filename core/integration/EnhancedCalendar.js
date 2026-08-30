@@ -56,29 +56,38 @@ export class EnhancedCalendar extends Calendar {
 
   /**
    * Get events with enhanced recurrence expansion
+   *
+   * Regular events overlapping the range are returned as stored. Every
+   * recurring series in the store is expanded with this calendar's
+   * RecurrenceEngineV2 (so instance modifications and cancellations apply),
+   * including series that started before the range. Occurrences are the
+   * engine's plain occurrence objects, with the id `<masterId>_<startMs>`
+   * (see `Event.occurrenceId`), `recurringEventId`, `isOccurrence: true` and
+   * `occurrenceStart`.
    */
   getEventsInRange(startDate, endDate, options = {}) {
     const startTime = performance.now();
+    const rangeStart = new Date(startDate);
+    const rangeEnd = new Date(endDate);
 
-    const regularEvents = [];
-    const recurringEvents = [];
+    // Recurring masters are represented by their occurrences below
+    const regularEvents = this.eventStore
+      .getEventsInRange(rangeStart, rangeEnd, false)
+      .filter(event => !event.recurring);
 
-    // Separate regular and recurring events
-    const allEvents = this.eventStore.getEventsInRange(startDate, endDate, false);
-
-    for (const event of allEvents) {
-      if (event.recurring) {
-        recurringEvents.push(event);
-      } else {
-        regularEvents.push(event);
-      }
-    }
+    // A series that started before the range can still occur inside it, so
+    // every recurring series is a candidate; the engine selects by range.
+    const recurringEvents = this.eventStore.queryEvents({ recurring: true });
 
     // Expand recurring events with enhanced engine
     const expandedOccurrences = [];
 
     for (const event of recurringEvents) {
-      const occurrences = this.recurrenceEngine.expandEvent(event, startDate, endDate, {
+      // Look back one event duration so occurrences that began before the
+      // range but overlap it are found
+      const duration = Math.max(0, event.end - event.start);
+      const expandStart = new Date(rangeStart.getTime() - duration);
+      const occurrences = this.recurrenceEngine.expandEvent(event, expandStart, rangeEnd, {
         maxOccurrences: options.maxOccurrences || 365,
         includeModified: options.includeModified !== false,
         includeCancelled: options.includeCancelled || false,
@@ -86,7 +95,16 @@ export class EnhancedCalendar extends Calendar {
         handleDST: options.handleDST !== false
       });
 
-      expandedOccurrences.push(...occurrences);
+      for (const occurrence of occurrences) {
+        if (occurrence.end < rangeStart || occurrence.start > rangeEnd) {
+          continue;
+        }
+        expandedOccurrences.push({
+          ...occurrence,
+          isOccurrence: true,
+          occurrenceStart: new Date(occurrence.start)
+        });
+      }
     }
 
     const endTime = performance.now();

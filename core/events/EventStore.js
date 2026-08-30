@@ -98,13 +98,16 @@ export class EventStore {
 
   /**
    * Update an existing event
-   * @param {string} eventId - The event ID
+   *
+   * An occurrence id (see {@link Event.occurrenceId}) updates the recurring
+   * master the occurrence belongs to, i.e. the whole series.
+   * @param {string} eventId - Event id or occurrence id
    * @param {Partial<import('../types.js').EventData>} updates - Properties to update
-   * @returns {Event} The updated event
+   * @returns {Event} The updated event (the master for an occurrence id)
    * @throws {Error} If event not found
    */
   updateEvent(eventId, updates) {
-    const existingEvent = this.events.get(eventId);
+    const existingEvent = this.events.get(eventId) || this._resolveOccurrenceMaster(eventId);
     if (!existingEvent) {
       throw new Error(`Event with id ${eventId} not found`);
     }
@@ -152,11 +155,14 @@ export class EventStore {
 
   /**
    * Remove an event from the store
-   * @param {string} eventId - The event ID to remove
+   *
+   * An occurrence id (see {@link Event.occurrenceId}) removes the recurring
+   * master the occurrence belongs to, i.e. the whole series.
+   * @param {string} eventId - Event id or occurrence id
    * @returns {boolean} True if removed, false if not found
    */
   removeEvent(eventId) {
-    const event = this.events.get(eventId);
+    const event = this.events.get(eventId) || this._resolveOccurrenceMaster(eventId);
     if (!event) {
       return false;
     }
@@ -193,8 +199,13 @@ export class EventStore {
 
   /**
    * Get an event by ID
-   * @param {string} eventId - The event ID
-   * @returns {Event|null} The event or null if not found
+   *
+   * Occurrence ids produced by {@link EventStore#expandRecurringEvent}
+   * (`<masterId>_<startMs>`, see {@link Event.occurrenceId}) resolve to the
+   * stored recurring master they were derived from, so an id taken from view
+   * data can always be looked up. Occurrences themselves are never stored.
+   * @param {string} eventId - Event id or occurrence id
+   * @returns {Event|null} The stored event (the master for an occurrence id) or null
    */
   getEvent(eventId) {
     // Check cache first
@@ -209,9 +220,26 @@ export class EventStore {
     // Cache if found
     if (event) {
       this.optimizer.cache(eventId, event, 'event');
+      return event;
     }
 
-    return event;
+    return this._resolveOccurrenceMaster(eventId);
+  }
+
+  /**
+   * Resolve an occurrence id to the stored recurring master it belongs to.
+   * Not cached: the master's own cache entry is the one kept in sync.
+   * @param {string} eventId - Candidate occurrence id
+   * @returns {Event|null} The master event or null
+   * @private
+   */
+  _resolveOccurrenceMaster(eventId) {
+    const parsed = Event.parseOccurrenceId(eventId);
+    if (!parsed) {
+      return null;
+    }
+    const master = this.events.get(parsed.recurringEventId);
+    return master && master.recurring ? master : null;
   }
 
   /**
@@ -343,14 +371,103 @@ export class EventStore {
 
   /**
    * Get events for a specific date
+   *
+   * Recurring series are expanded for the day, so the result holds their
+   * occurrences (see {@link EventStore#expandRecurringEvent}) rather than the
+   * master events. When building a grid of days use
+   * {@link EventStore#getEventsByDate}, which expands once for the whole range.
    * @param {Date} date - The date to query
    * @param {string} [timezone] - Timezone for the query (defaults to store timezone)
    * @returns {Event[]} Events occurring on the date, sorted by start time
    */
   getEventsForDate(date, timezone = null) {
     timezone = timezone || this.defaultTimezone;
+    const dayStart = DateUtils.startOfDay(date);
+    const dayEnd = DateUtils.endOfDay(date);
 
-    // Collect candidate event IDs from indices
+    const candidates = [];
+    for (const id of this._collectDateCandidateIds(date)) {
+      const event = this.events.get(id);
+      // Recurring masters are represented by their occurrences below
+      if (event && !event.recurring) {
+        candidates.push(event);
+      }
+    }
+
+    for (const id of this.indices.recurring) {
+      const event = this.events.get(id);
+      if (event) {
+        candidates.push(...this.expandRecurringEvent(event, dayStart, dayEnd, timezone));
+      }
+    }
+
+    return this._selectEventsForDay(candidates, dayStart, dayEnd, timezone);
+  }
+
+  /**
+   * Get the events for every day in a range, keyed by local date (YYYY-MM-DD)
+   *
+   * Recurring series are expanded once for the whole range rather than once
+   * per day, which is what a month or week grid needs. Every day in the range
+   * has an entry (an empty array when nothing occurs) and multi-day events
+   * appear under each day they span. Each array is sorted like
+   * {@link EventStore#getEventsForDate}.
+   *
+   * @example
+   * const byDate = store.getEventsByDate(gridStart, gridEnd);
+   * const events = byDate.get(DateUtils.getLocalDateString(cellDate)) || [];
+   *
+   * @param {Date} start - First day of the range
+   * @param {Date} end - Last day of the range
+   * @param {string} [timezone] - Timezone deciding which day an event falls on (defaults to store timezone)
+   * @returns {Map<string, Event[]>} Local date string -> events on that day
+   */
+  getEventsByDate(start, end, timezone = null) {
+    timezone = timezone || this.defaultTimezone;
+    const rangeStart = DateUtils.startOfDay(start);
+    const rangeEnd = DateUtils.endOfDay(end);
+
+    /** @type {Map<string, Event[]>} */
+    const byDate = new Map();
+    for (const day of DateUtils.getDateRange(rangeStart, rangeEnd)) {
+      byDate.set(DateUtils.getLocalDateString(day), []);
+    }
+
+    // Query one day beyond each edge so events that fall on an edge day in
+    // the requested timezone are not lost to the UTC-based range filter.
+    const events = this.getEventsInRange(
+      DateUtils.addDays(rangeStart, -1),
+      DateUtils.addDays(rangeEnd, 1),
+      true,
+      timezone
+    );
+
+    for (const event of events) {
+      const eventStart = event.getStartInTimezone(timezone);
+      const eventEnd = event.getEndInTimezone(timezone);
+      const lastDay = eventEnd < rangeEnd ? eventEnd : rangeEnd;
+      let day = DateUtils.startOfDay(eventStart > rangeStart ? eventStart : rangeStart);
+      while (day <= lastDay) {
+        byDate.get(DateUtils.getLocalDateString(day))?.push(event);
+        day = DateUtils.addDays(day, 1);
+      }
+    }
+
+    const compare = this._compareByStart(timezone);
+    for (const dayEvents of byDate.values()) {
+      dayEvents.sort(compare);
+    }
+
+    return byDate;
+  }
+
+  /**
+   * Collect the ids of stored events that may occur on a date.
+   * @param {Date} date - The date to query
+   * @returns {Set<string>} Candidate event ids
+   * @private
+   */
+  _collectDateCandidateIds(date) {
     const candidateIds = new Set();
 
     // Check byDate index for nearby dates (handles most events)
@@ -374,35 +491,41 @@ export class EventStore {
       monthEventIds.forEach(id => candidateIds.add(id));
     }
 
-    // Filter candidates to events that actually overlap with the requested date
-    const allEvents = [];
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    return candidateIds;
+  }
 
-    for (const id of candidateIds) {
-      const event = this.events.get(id);
-      if (event) {
-        // Check if event actually occurs on the requested date in the given timezone
-        const eventStartLocal = event.getStartInTimezone(timezone);
-        const eventEndLocal = event.getEndInTimezone(timezone);
+  /**
+   * Keep the events that overlap a day in the given timezone, sorted by start.
+   * @param {Event[]} events - Candidate events
+   * @param {Date} dayStart - Start of the day
+   * @param {Date} dayEnd - End of the day
+   * @param {string} timezone - Timezone deciding whether an event falls on the day
+   * @returns {Event[]} Events on the day, sorted
+   * @private
+   */
+  _selectEventsForDay(events, dayStart, dayEnd, timezone) {
+    const onDay = events.filter(event => {
+      // Event overlaps with this day if it starts before end of day and ends after start of day
+      const eventStartLocal = event.getStartInTimezone(timezone);
+      const eventEndLocal = event.getEndInTimezone(timezone);
+      return eventStartLocal <= dayEnd && eventEndLocal >= dayStart;
+    });
 
-        // Event overlaps with this day if it starts before end of day and ends after start of day
-        if (eventStartLocal <= endOfDay && eventEndLocal >= startOfDay) {
-          allEvents.push(event);
-        }
-      }
-    }
+    return onDay.sort(this._compareByStart(timezone));
+  }
 
-    return allEvents.sort((a, b) => {
-      // Sort by start time in the specified timezone
-      const aStart = a.getStartInTimezone(timezone);
-      const bStart = b.getStartInTimezone(timezone);
-      const timeCompare = aStart - bStart;
+  /**
+   * Comparator ordering events by start time in a timezone, longer events first.
+   * @param {string} timezone - Timezone used for the start comparison
+   * @returns {(a: Event, b: Event) => number} Comparator
+   * @private
+   */
+  _compareByStart(timezone) {
+    return (a, b) => {
+      const timeCompare = a.getStartInTimezone(timezone) - b.getStartInTimezone(timezone);
       if (timeCompare !== 0) return timeCompare;
       return b.duration - a.duration; // Longer events first
-    });
+    };
   }
 
   /**
@@ -478,11 +601,19 @@ export class EventStore {
    * @returns {Array<Event[]>} Array of event groups that overlap
    */
   getOverlapGroups(date, timedOnly = true) {
-    let events = this.getEventsForDate(date);
+    return this.groupOverlappingEvents(this.getEventsForDate(date), timedOnly);
+  }
 
-    if (timedOnly) {
-      events = events.filter(e => !e.allDay);
-    }
+  /**
+   * Group a list of events into clusters of overlapping time slots
+   * Same result as {@link EventStore#getOverlapGroups} for events already fetched
+   * (for example one day of {@link EventStore#getEventsByDate}).
+   * @param {Event[]} events - Events to group; the array is not modified
+   * @param {boolean} [timedOnly=true] - Only include timed events (not all-day)
+   * @returns {Array<Event[]>} Array of event groups that overlap
+   */
+  groupOverlappingEvents(events, timedOnly = true) {
+    events = timedOnly ? events.filter(e => !e.allDay) : [...events];
 
     if (events.length === 0) return [];
 
@@ -644,6 +775,16 @@ export class EventStore {
 
   /**
    * Expand a recurring event into individual occurrences
+   *
+   * Returns every occurrence that overlaps the range, including ones that
+   * start before it but run into it (multi-day series). Each occurrence is an
+   * {@link Event} cloned from the master with:
+   * - `id` from {@link Event.occurrenceId} (`<masterId>_<startMs>`), stable
+   *   across ranges and resolvable with {@link EventStore#getEvent},
+   * - `isOccurrence: true`, `recurringEventId` and `occurrenceStart`,
+   * - `metadata.recurringEventId`, `metadata.occurrenceId` (same as `id`) and
+   *   `metadata.occurrenceIndex` (position within this expansion).
+   * Non-recurring events are returned as-is in a one-element array.
    * @param {Event} event - The recurring event
    * @param {Date} rangeStart - Start of the expansion range
    * @param {Date} rangeEnd - End of the expansion range
@@ -659,27 +800,57 @@ export class EventStore {
 
     // Expand in the event's timezone for accurate recurrence calculation
     const eventTimezone = event.timeZone || timezone;
-    const occurrences = this.recurrenceEngine.expandEvent(event, rangeStart, rangeEnd, {
+
+    // The engine selects occurrences by start, so look back one event
+    // duration to catch occurrences that began before the range but overlap it
+    const duration = Math.max(0, event.end - event.start);
+    const expandStart = new Date(rangeStart.getTime() - duration);
+    const occurrences = this.recurrenceEngine.expandEvent(event, expandStart, rangeEnd, {
       timezone: eventTimezone
     });
 
-    return occurrences.map((occurrence, index) => {
-      // Create a new event instance for each occurrence
-      const occurrenceEvent = event.clone({
-        id: `${event.id}_occurrence_${index}`,
-        start: occurrence.start,
-        end: occurrence.end,
-        timeZone: occurrence.timezone || eventTimezone,
-        metadata: {
-          ...event.metadata,
-          recurringEventId: event.id,
-          occurrenceId: occurrence.id,
-          occurrenceIndex: index
-        }
-      });
+    const expanded = [];
+    for (const occurrence of occurrences) {
+      if (occurrence.end < rangeStart || occurrence.start > rangeEnd) {
+        continue;
+      }
+      expanded.push(this._createOccurrence(event, occurrence, eventTimezone, expanded.length));
+    }
 
-      return occurrenceEvent;
+    return expanded;
+  }
+
+  /**
+   * Build the Event instance for one occurrence of a recurring master.
+   * @param {Event} event - The recurring master
+   * @param {{start: Date, end: Date, timezone?: string}} occurrence - Engine occurrence
+   * @param {string} eventTimezone - Timezone the series was expanded in
+   * @param {number} index - Position within the current expansion
+   * @returns {Event} Occurrence event
+   * @private
+   */
+  _createOccurrence(event, occurrence, eventTimezone, index) {
+    const occurrenceStart = new Date(occurrence.start);
+    const id = Event.occurrenceId(event.id, occurrenceStart);
+
+    const occurrenceEvent = event.clone({
+      id,
+      start: occurrenceStart,
+      end: new Date(occurrence.end),
+      timeZone: occurrence.timezone || eventTimezone,
+      metadata: {
+        ...event.metadata,
+        recurringEventId: event.id,
+        occurrenceId: id,
+        occurrenceIndex: index
+      }
     });
+
+    occurrenceEvent.isOccurrence = true;
+    occurrenceEvent.recurringEventId = event.id;
+    occurrenceEvent.occurrenceStart = new Date(occurrenceStart);
+
+    return occurrenceEvent;
   }
 
   /**
