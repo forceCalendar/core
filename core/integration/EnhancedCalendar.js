@@ -24,6 +24,40 @@ export class EnhancedCalendar extends Calendar {
 
     // Setup event listeners for real-time indexing
     this.setupRealtimeIndexing();
+
+    // The enhanced engine keeps its own expansion cache, so drop the entries
+    // of every series the store changes
+    this._unsubscribeCacheInvalidation = this.eventStore.subscribe(change =>
+      this._invalidateOccurrenceCache(change)
+    );
+  }
+
+  /**
+   * Invalidate the enhanced engine's cached expansions for a store change
+   * @param {import('../types.js').EventStoreChange} change - Store change
+   * @private
+   */
+  _invalidateOccurrenceCache(change) {
+    const engine = this.recurrenceEngine;
+    if (!engine || !change) {
+      return;
+    }
+    switch (change.type) {
+      case 'add':
+      case 'update':
+      case 'remove':
+        if (change.event) {
+          engine.clearEventCache(change.event.id);
+        }
+        break;
+      case 'batch':
+        for (const entry of change.changes || []) {
+          this._invalidateOccurrenceCache(entry);
+        }
+        break;
+      default:
+        engine.occurrenceCache.clear();
+    }
   }
 
   /**
@@ -439,6 +473,10 @@ export class EnhancedCalendar extends Calendar {
     if (typeof this._clearReindexTimeout === 'function') {
       this._clearReindexTimeout();
       this._clearReindexTimeout = null;
+    }
+    if (typeof this._unsubscribeCacheInvalidation === 'function') {
+      this._unsubscribeCacheInvalidation();
+      this._unsubscribeCacheInvalidation = null;
     }
 
     // Clean up worker

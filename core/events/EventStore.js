@@ -148,6 +148,7 @@ export class EventStore {
     // Clear query and date range caches since results may have changed
     this.optimizer.queryCache.clear();
     this.optimizer.dateRangeCache.clear();
+    this._invalidateOccurrenceCache(replacement.id);
 
     // Re-index
     this._indexEvent(replacement);
@@ -192,9 +193,29 @@ export class EventStore {
     this.optimizer.eventCache.delete(event.id);
     this.optimizer.queryCache.clear();
     this.optimizer.dateRangeCache.clear();
+    this._invalidateOccurrenceCache(event.id);
 
     // Remove from indices
     this._unindexEvent(event);
+  }
+
+  /**
+   * Drop the recurrence engine's cached expansions of one series, or of
+   * every series when no id is given. The engine is pluggable, so both
+   * hooks are optional.
+   * @param {string} [eventId] - Series to invalidate; omit to clear everything
+   * @private
+   */
+  _invalidateOccurrenceCache(eventId = null) {
+    const engine = this.recurrenceEngine;
+    if (!engine) {
+      return;
+    }
+    if (eventId !== null && typeof engine.clearEventCache === 'function') {
+      engine.clearEventCache(eventId);
+    } else if (engine.occurrenceCache instanceof Map) {
+      engine.occurrenceCache.clear();
+    }
   }
 
   /**
@@ -950,6 +971,7 @@ export class EventStore {
     this.indices.byCategory.clear();
     this.indices.byStatus.clear();
     this.eventIndexRefs.clear();
+    this._invalidateOccurrenceCache();
 
     this._notifyChange({
       type: 'clear',
@@ -1609,12 +1631,13 @@ export class EventStore {
   }
 
   /**
-   * Clear all caches
+   * Clear all caches, including the recurrence engine's cached expansions
    */
   clearCaches() {
     this.optimizer.eventCache.clear();
     this.optimizer.queryCache.clear();
     this.optimizer.dateRangeCache.clear();
+    this._invalidateOccurrenceCache();
   }
 
   /**

@@ -69,7 +69,7 @@ export class RecurrenceEngineV2 {
     const maxOccurrences = Math.min(requestedMax, RecurrenceEngineV2.MAX_OCCURRENCES_HARD_LIMIT);
 
     // Check cache
-    const cacheKey = this.getCacheKey(event.id, rangeStart, rangeEnd, options);
+    const cacheKey = this.getCacheKey(event, rangeStart, rangeEnd, options);
     if (this.occurrenceCache.has(cacheKey)) {
       return this.cloneOccurrences(this.occurrenceCache.get(cacheKey));
     }
@@ -944,9 +944,45 @@ export class RecurrenceEngineV2 {
 
   /**
    * Create cache key
+   *
+   * When given the event itself the key also covers everything the
+   * expansion depends on (DTSTART, end, recurrence rule), so a series that
+   * is updated, replaced or re-added under the same id can never be served
+   * a stale expansion. Keys always start with `<eventId>_`, which is what
+   * {@link RecurrenceEngineV2#clearEventCache} matches on.
+   * @param {import('./Event.js').Event|string} event - Recurring event, or just its id
+   * @param {Date} start - Start of expansion range
+   * @param {Date} end - End of expansion range
+   * @param {Object} options - Expansion options
+   * @returns {string} Cache key
    */
-  getCacheKey(eventId, start, end, options) {
-    return `${eventId}_${start.getTime()}_${end.getTime()}_${JSON.stringify(options)}`;
+  getCacheKey(event, start, end, options) {
+    const eventId = typeof event === 'string' ? event : event.id;
+    const key = `${eventId}_${start.getTime()}_${end.getTime()}_${JSON.stringify(options)}`;
+    if (typeof event === 'string') {
+      return key;
+    }
+    const startMs = new Date(event.start).getTime();
+    const endMs = new Date(event.end).getTime();
+    return `${key}|${startMs}|${endMs}|${this._ruleFingerprint(event.recurrenceRule)}`;
+  }
+
+  /**
+   * Stable text form of a recurrence rule for cache keys. A rule that
+   * cannot be serialised gets a unique fingerprint, i.e. is never cached.
+   * @param {string|Object} rule - RRULE string or rule object
+   * @returns {string} Fingerprint
+   * @private
+   */
+  _ruleFingerprint(rule) {
+    if (typeof rule === 'string') {
+      return rule;
+    }
+    try {
+      return JSON.stringify(rule);
+    } catch {
+      return `uncacheable:${Date.now()}:${Math.random()}`;
+    }
   }
 
   /**
