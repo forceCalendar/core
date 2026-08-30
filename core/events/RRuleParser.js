@@ -216,10 +216,26 @@ export class RRuleParser {
   }
 
   /**
-   * Validate and normalize rule
+   * Validate and normalize a rule.
+   *
+   * Works on a copy: rule objects handed in are typically the stored
+   * recurrenceRule of an Event, and normalising them in place would make
+   * the stored event differ from the data it was created from (a spurious
+   * update on the next reconcile) and let the engines' per-rule caches leak
+   * into it. The copy is shallow except for the array fields, which are
+   * copied as well.
+   * @param {Object} rule - Rule object (not modified)
+   * @returns {Object} Normalised copy
    * @private
    */
   static validateRule(rule) {
+    rule = { ...rule };
+    for (const field of ['byDay', 'bySetPos', 'exceptions']) {
+      if (Array.isArray(rule[field])) {
+        rule[field] = [...rule[field]];
+      }
+    }
+
     // Ensure frequency is set
     if (!rule.freq) {
       rule.freq = 'DAILY';
@@ -230,8 +246,8 @@ export class RRuleParser {
       throw new Error('RRULE cannot have both COUNT and UNTIL');
     }
 
-    // Validate interval
-    if (rule.interval < 1) {
+    // Validate interval (RFC 5545 default is 1; rule objects may omit it)
+    if (!Number.isInteger(rule.interval) || rule.interval < 1) {
       rule.interval = 1;
     }
 

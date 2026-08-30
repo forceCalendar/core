@@ -677,6 +677,8 @@ export class Event {
    * Scalars are compared with strict equality, dates by timestamp and
    * structured fields (recurrence rule, organizer, attendees, reminders,
    * categories, attachments, conference data, metadata) structurally.
+   * The `color` shorthand is not listed: normalization copies it into
+   * `backgroundColor` and `borderColor`, which are compared instead.
    * @type {ReadonlyArray<string>}
    */
   static EQUIVALENCE_FIELDS = Object.freeze([
@@ -689,7 +691,6 @@ export class Event {
     'endTimeZone',
     'description',
     'location',
-    'color',
     'backgroundColor',
     'borderColor',
     'textColor',
