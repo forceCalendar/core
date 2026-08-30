@@ -231,6 +231,13 @@ export class ICSHandler {
 
   /**
    * Fetch a URL after validating the initial URL and each redirect target.
+   *
+   * In Node, redirects are handled manually so every hop is validated
+   * before it is requested. Elsewhere the runtime follows redirects itself,
+   * before the target can be inspected; as a best effort the final URL of
+   * the response is validated afterwards and the body is discarded if it
+   * is not allowed, so the content of an internal resource is never
+   * returned to the caller.
    * @private
    */
   async fetchSafeURL(url, { signal, maxRedirects }) {
@@ -249,19 +256,56 @@ export class ICSHandler {
         redirect: manualRedirects ? 'manual' : 'follow'
       });
 
-      if (
-        !manualRedirects ||
-        response.status < 300 ||
-        response.status >= 400 ||
-        !response.headers.get('location')
-      ) {
+      if (!manualRedirects) {
+        return ICSHandler.assertSafeFinalURL(response, currentURL);
+      }
+
+      const location = response.headers.get('location');
+      if (response.status < 300 || response.status >= 400 || !location) {
         return response;
       }
 
-      currentURL = new URL(response.headers.get('location'), currentURL).toString();
+      await ICSHandler.discardBody(response);
+      currentURL = new URL(location, currentURL).toString();
     }
 
     throw new Error(`Too many redirects while fetching ICS feed (limit ${maxRedirects})`);
+  }
+
+  /**
+   * Validate the URL a followed-redirect response actually came from and
+   * discard its body when that URL is not allowed.
+   * @param {Response} response - Response from a fetch with redirect: 'follow'
+   * @param {string} requestedURL - URL that was requested
+   * @returns {Promise<Response>} The response, when its final URL is allowed
+   * @private
+   */
+  static async assertSafeFinalURL(response, requestedURL) {
+    const finalURL =
+      typeof response.url === 'string' && response.url !== '' ? response.url : requestedURL;
+    try {
+      ICSHandler.validateURL(finalURL);
+    } catch (error) {
+      await ICSHandler.discardBody(response);
+      throw new Error(`Redirected to a URL that is not allowed: ${error.message}`, {
+        cause: error
+      });
+    }
+    return response;
+  }
+
+  /**
+   * Cancel a response body that will not be read (best effort).
+   * @private
+   */
+  static async discardBody(response) {
+    try {
+      if (response?.body && typeof response.body.cancel === 'function') {
+        await response.body.cancel();
+      }
+    } catch {
+      // The body is being thrown away; a failure to cancel it is harmless
+    }
   }
 
   /**
@@ -335,25 +379,49 @@ export class ICSHandler {
   }
 
   /**
-   * Validate a URL and, in Node runtimes, ensure DNS does not resolve privately.
+   * Validate a URL for fetching. Address literals must not be private or
+   * reserved once normalised (IPv6 forms that embed an IPv4 address are
+   * checked as that address); in Node runtimes every other hostname is
+   * resolved and each of its addresses is checked the same way.
    * @param {string} url - URL to validate
    * @returns {Promise<URL>} Parsed safe URL
    */
   static async validateURLForFetch(url) {
     const parsed = ICSHandler.validateURL(url);
+    const hostname = ICSHandler.normalizeHostname(parsed.hostname);
 
-    if (ICSHandler.isNodeRuntime() && !ICSHandler.isIPAddress(parsed.hostname)) {
-      const dns = await import('node:dns/promises');
-      const addresses = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
+    if (ICSHandler.isIPAddress(hostname)) {
+      if (ICSHandler.isPrivateIPAddress(hostname)) {
+        throw new Error('URLs pointing to private/internal networks are not allowed');
+      }
+      return parsed;
+    }
 
-      for (const address of addresses) {
-        if (ICSHandler.isPrivateIPAddress(address.address)) {
+    if (ICSHandler.isNodeRuntime()) {
+      const addresses = await ICSHandler.resolveHostname(hostname);
+      if (!Array.isArray(addresses) || addresses.length === 0) {
+        throw new Error('URL hostname did not resolve to any address');
+      }
+      for (const entry of addresses) {
+        const address = typeof entry === 'string' ? entry : entry?.address;
+        if (typeof address !== 'string' || ICSHandler.isPrivateIPAddress(address)) {
           throw new Error('URL hostname resolves to a private/internal network address');
         }
       }
     }
 
     return parsed;
+  }
+
+  /**
+   * Resolve a hostname to all of its addresses (Node runtimes only).
+   * @param {string} hostname - Hostname to resolve
+   * @returns {Promise<Array<{address: string, family: number}>>} Resolved addresses
+   * @private
+   */
+  static async resolveHostname(hostname) {
+    const dns = await import('node:dns/promises');
+    return dns.lookup(hostname, { all: true, verbatim: true });
   }
 
   /**
@@ -395,49 +463,179 @@ export class ICSHandler {
   }
 
   /**
+   * Whether an address literal is private, loopback, link-local or
+   * otherwise reserved. IPv6 literals are fully parsed first, so every
+   * notation of an address (bracketed, mixed case, compressed with '::',
+   * IPv4-mapped in dotted or hexadecimal form, NAT64, 6to4) is judged by
+   * the address it denotes. A literal that cannot be parsed is treated as
+   * private.
+   * @param {string} address - IPv4 or IPv6 address literal
+   * @returns {boolean}
    * @private
    */
   static isPrivateIPAddress(address) {
     const normalized = ICSHandler.normalizeHostname(address);
-    const ipv4Match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
 
-    if (ipv4Match) {
-      const octets = ipv4Match.slice(1).map(Number);
-      if (octets.some(octet => octet < 0 || octet > 255)) return true;
-
-      const [first, second] = octets;
-      return (
-        first === 0 ||
-        first === 10 ||
-        first === 127 ||
-        first >= 224 ||
-        (first === 100 && second >= 64 && second <= 127) ||
-        (first === 169 && second === 254) ||
-        (first === 172 && second >= 16 && second <= 31) ||
-        (first === 192 && second === 168) ||
-        (first === 198 && (second === 18 || second === 19))
-      );
-    }
-
-    const mappedIPv4 = normalized.match(/::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-    if (mappedIPv4) {
-      return ICSHandler.isPrivateIPAddress(mappedIPv4[1]);
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalized)) {
+      const octets = ICSHandler.parseIPv4(normalized);
+      return !octets || ICSHandler.isPrivateIPv4(octets);
     }
 
     if (!normalized.includes(':')) {
       return false;
     }
 
-    if (normalized === '::' || normalized === '::1') {
-      return true;
+    const hextets = ICSHandler.parseIPv6(normalized);
+    return !hextets || ICSHandler.isPrivateIPv6(hextets);
+  }
+
+  /**
+   * Parse a dotted-quad IPv4 address into its octets
+   * @param {string} address - Address text
+   * @returns {number[]|null} Four octets, or null if not a valid dotted quad
+   * @private
+   */
+  static parseIPv4(address) {
+    const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
+    if (!match) {
+      return null;
+    }
+    const octets = match.slice(1).map(Number);
+    return octets.some(octet => octet > 255) ? null : octets;
+  }
+
+  /**
+   * Parse an IPv6 address into its eight 16-bit groups. Accepts the
+   * compressed form ('::'), an embedded dotted-quad IPv4 address in the
+   * last 32 bits and a zone identifier suffix, which is ignored.
+   * @param {string} address - Address text without brackets
+   * @returns {number[]|null} Eight hextets, or null if not a valid IPv6 address
+   * @private
+   */
+  static parseIPv6(address) {
+    let text = String(address).toLowerCase();
+    const zone = text.indexOf('%');
+    if (zone !== -1) {
+      text = text.slice(0, zone);
+    }
+    if (!/^[0-9a-f:.]+$/.test(text) || !text.includes(':')) {
+      return null;
     }
 
-    const firstHextet = parseInt(normalized.split(':')[0] || '0', 16);
+    // An embedded IPv4 address (::ffff:127.0.0.1) becomes two hextets
+    const lastColon = text.lastIndexOf(':');
+    const tail = text.slice(lastColon + 1);
+    if (tail.includes('.')) {
+      const octets = ICSHandler.parseIPv4(tail);
+      if (!octets) {
+        return null;
+      }
+      const high = ((octets[0] << 8) | octets[1]).toString(16);
+      const low = ((octets[2] << 8) | octets[3]).toString(16);
+      text = `${text.slice(0, lastColon + 1)}${high}:${low}`;
+    } else if (text.includes('.')) {
+      return null;
+    }
+
+    const halves = text.split('::');
+    if (halves.length > 2) {
+      return null;
+    }
+    const groupsOf = part => (part === '' ? [] : part.split(':'));
+    const head = groupsOf(halves[0]);
+    const rest = halves.length === 2 ? groupsOf(halves[1]) : [];
+    if (halves.length === 1 ? head.length !== 8 : head.length + rest.length > 7) {
+      return null;
+    }
+    const groups = [...head, ...new Array(8 - head.length - rest.length).fill('0'), ...rest];
+
+    const hextets = [];
+    for (const group of groups) {
+      if (!/^[0-9a-f]{1,4}$/.test(group)) {
+        return null;
+      }
+      hextets.push(parseInt(group, 16));
+    }
+    return hextets;
+  }
+
+  /**
+   * @param {number[]} octets - Four IPv4 octets
+   * @returns {boolean} Whether the address is private or reserved
+   * @private
+   */
+  static isPrivateIPv4(octets) {
+    const [first, second] = octets;
     return (
-      (firstHextet & 0xfe00) === 0xfc00 ||
-      (firstHextet & 0xffc0) === 0xfe80 ||
-      (firstHextet & 0xffc0) === 0xfec0 ||
-      (firstHextet & 0xff00) === 0xff00
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      first >= 224 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 198 && (second === 18 || second === 19))
+    );
+  }
+
+  /**
+   * @param {number[]} h - Eight IPv6 hextets
+   * @returns {boolean} Whether the address is private or reserved
+   * @private
+   */
+  static isPrivateIPv6(h) {
+    const zeroThrough = end => h.slice(0, end).every(hextet => hextet === 0);
+    const embeddedIPv4 = (high, low) => [high >> 8, high & 0xff, low >> 8, low & 0xff];
+
+    // ::/96 covers the unspecified address, loopback (::1) and the
+    // deprecated IPv4-compatible form (::a.b.c.d)
+    if (zeroThrough(6)) {
+      return true;
+    }
+    // ::ffff:0:0/96 IPv4-mapped (::ffff:a.b.c.d, ::ffff:7f00:1)
+    if (zeroThrough(5) && h[5] === 0xffff) {
+      return ICSHandler.isPrivateIPv4(embeddedIPv4(h[6], h[7]));
+    }
+    // ::ffff:0:0:0/96 IPv4-translated (SIIT)
+    if (zeroThrough(4) && h[4] === 0xffff && h[5] === 0) {
+      return ICSHandler.isPrivateIPv4(embeddedIPv4(h[6], h[7]));
+    }
+    if (h[0] === 0x64 && h[1] === 0xff9b) {
+      // 64:ff9b::/96 NAT64 well-known prefix embeds an IPv4 address
+      if (h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0) {
+        return ICSHandler.isPrivateIPv4(embeddedIPv4(h[6], h[7]));
+      }
+      // 64:ff9b:1::/48 local-use NAT64
+      if (h[2] === 1) {
+        return true;
+      }
+    }
+    // 100::/64 discard-only
+    if (h[0] === 0x100 && h[1] === 0 && h[2] === 0 && h[3] === 0) {
+      return true;
+    }
+    // 2002::/16 6to4 embeds the IPv4 address in the second and third hextets
+    if (h[0] === 0x2002) {
+      return ICSHandler.isPrivateIPv4(embeddedIPv4(h[1], h[2]));
+    }
+    if (h[0] === 0x2001) {
+      // 2001::/32 Teredo relays to arbitrary IPv4 hosts; 2001:db8::/32
+      // documentation; 2001:10::/28 and 2001:20::/28 ORCHID
+      if (
+        h[1] === 0 ||
+        h[1] === 0x0db8 ||
+        (h[1] & 0xfff0) === 0x0010 ||
+        (h[1] & 0xfff0) === 0x0020
+      ) {
+        return true;
+      }
+    }
+    return (
+      (h[0] & 0xfe00) === 0xfc00 || // fc00::/7 unique local
+      (h[0] & 0xffc0) === 0xfe80 || // fe80::/10 link local
+      (h[0] & 0xffc0) === 0xfec0 || // fec0::/10 site local (deprecated)
+      (h[0] & 0xff00) === 0xff00 // ff00::/8 multicast
     );
   }
 
