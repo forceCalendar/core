@@ -4,6 +4,8 @@ import { RRuleParser } from './RRuleParser.js';
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
+const WEEKDAY_NUMBERS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
 // Timezone databases know only local mean time before the 19th century, so
 // a span that ends before this instant is checked at its ends rather than
 // probed week by week
@@ -1088,15 +1090,17 @@ export class RecurrenceEngine {
             next.setDate(Math.min(monthDay, daysInMonth));
           }
         } else if (rule.byDay && rule.byDay.length > 0) {
-          // Specific weekday of month (e.g., "2nd Tuesday")
+          // Specific weekday of month (e.g., "2nd Tuesday"). Move to the
+          // first so the month step cannot overflow from a 29th-31st.
+          next.setDate(1);
           next.setMonth(next.getMonth() + rule.interval);
           // Extract position from the day code itself (e.g., "2TU" -> pos=2)
           // or fall back to bySetPos
           const dayCode = rule.byDay[0];
-          const dayMatch = dayCode.match(/^(-?\d+)?([A-Z]{2})$/);
-          const embeddedPos = dayMatch && dayMatch[1] ? parseInt(dayMatch[1], 10) : null;
+          const parsedDay = RRuleParser.parseByDayToken(dayCode);
+          const embeddedPos = parsedDay ? parsedDay.nth : null;
           const pos = embeddedPos || (rule.bySetPos && rule.bySetPos[0]) || 1;
-          this.setToWeekdayOfMonth(next, rule.byDay[0], pos);
+          this.setToWeekdayOfMonth(next, dayCode, pos);
         } else {
           // Same day of month
           next.setMonth(next.getMonth() + rule.interval);
@@ -1159,12 +1163,11 @@ export class RecurrenceEngine {
    * @private
    */
   static _buildByDaySet(byDay) {
-    const dayMap = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
     const set = new Set();
     for (const day of byDay) {
-      const match = /^(-?\d+)?([A-Z]{2})$/.exec(day);
-      if (match && dayMap[match[2]] !== undefined) {
-        set.add(dayMap[match[2]]);
+      const parsed = RRuleParser.parseByDayToken(day);
+      if (parsed) {
+        set.add(WEEKDAY_NUMBERS[parsed.weekday]);
       }
     }
     return set;
@@ -1177,54 +1180,28 @@ export class RecurrenceEngine {
    * @returns {boolean}
    */
   static matchesByDay(date, byDay) {
-    const dayMap = {
-      SU: 0,
-      MO: 1,
-      TU: 2,
-      WE: 3,
-      TH: 4,
-      FR: 5,
-      SA: 6
-    };
-
     const dayOfWeek = date.getDay();
     return byDay.some(day => {
       // Handle numbered weekdays (e.g., "2MO" for 2nd Monday)
-      const match = day.match(/^(-?\d+)?([A-Z]{2})$/);
-      if (match) {
-        const weekdayCode = match[2];
-        return dayMap[weekdayCode] === dayOfWeek;
-      }
-      return false;
+      const parsed = RRuleParser.parseByDayToken(day);
+      return parsed !== null && WEEKDAY_NUMBERS[parsed.weekday] === dayOfWeek;
     });
   }
 
   /**
    * Set date to specific weekday of month
    * @param {Date} date - Date to modify
-   * @param {string} weekday - Weekday code (e.g., 'MO', 'TU')
+   * @param {string} weekday - Weekday code (e.g., 'MO', 'TU'; an ordinal prefix is ignored)
    * @param {number} position - Position in month (1-5, or -1 for last)
+   * @throws {RangeError} If the weekday code is not one of SU, MO, TU, WE, TH, FR, SA
    */
   static setToWeekdayOfMonth(date, weekday, position = 1) {
-    const dayMap = {
-      SU: 0,
-      MO: 1,
-      TU: 2,
-      WE: 3,
-      TH: 4,
-      FR: 5,
-      SA: 6
-    };
-
-    // Extract weekday code if it has a number prefix
-    const match = weekday.match(/^(-?\d+)?([A-Z]{2})$/);
-    const weekdayCode = match ? match[2] : weekday;
-    const targetDay = dayMap[weekdayCode];
+    const targetDay = this._weekdayNumber(weekday);
 
     date.setDate(1); // Start at first of month
 
-    // Find first occurrence of the weekday
-    while (date.getDay() !== targetDay) {
+    // Find first occurrence of the weekday (at most six days away)
+    for (let i = 0; i < 7 && date.getDay() !== targetDay; i++) {
       date.setDate(date.getDate() + 1);
     }
 
@@ -1237,11 +1214,30 @@ export class RecurrenceEngine {
       nextMonth.setMonth(nextMonth.getMonth() + 1);
       nextMonth.setDate(0); // Last day of current month
 
-      while (nextMonth.getDay() !== targetDay) {
+      for (let i = 0; i < 7 && nextMonth.getDay() !== targetDay; i++) {
         nextMonth.setDate(nextMonth.getDate() - 1);
       }
       date.setTime(nextMonth.getTime());
     }
+  }
+
+  /**
+   * Date#getDay() number of a BYDAY code. Weekday searches step until
+   * getDay() equals this number, so a code that does not name a weekday
+   * is refused rather than searched for.
+   * @param {string|{nth?: number, weekday: string}} weekday - BYDAY entry
+   * @returns {number} Weekday number 0-6
+   * @throws {RangeError} If the entry does not name a weekday
+   * @private
+   */
+  static _weekdayNumber(weekday) {
+    const parsed = RRuleParser.parseByDayToken(weekday);
+    if (!parsed) {
+      throw new RangeError(
+        `RecurrenceEngine: BYDAY value "${String(weekday)}" does not name a weekday (SU, MO, TU, WE, TH, FR, SA)`
+      );
+    }
+    return WEEKDAY_NUMBERS[parsed.weekday];
   }
 
   /**
@@ -1404,9 +1400,9 @@ export class RecurrenceEngine {
     };
 
     // Extract day code if it has a number prefix
-    const match = dayCode.match(/^(-?\d+)?([A-Z]{2})$/);
-    const code = match ? match[2] : dayCode;
-    const position = match && match[1] ? parseInt(match[1], 10) : null;
+    const parsed = RRuleParser.parseByDayToken(dayCode);
+    const code = parsed ? parsed.weekday : dayCode;
+    const position = parsed ? parsed.nth : null;
 
     let name = dayNames[code] || dayCode;
 

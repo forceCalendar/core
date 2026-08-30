@@ -3,6 +3,13 @@
  * Supports all RFC 5545 recurrence rule features
  */
 
+const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+// RFC 5545 weekdaynum: an optional signed ordinal (1-53) and a weekday code.
+// An explicit '+' and lowercase codes are accepted and normalised away.
+const BYDAY_TOKEN = /^([+-]?\d{1,2})?([A-Za-z]{2})$/;
+const MAX_ORDINAL = 53;
+
 export class RRuleParser {
   /**
    * Parse an RRULE string into a structured rule object
@@ -131,28 +138,90 @@ export class RRuleParser {
 
   /**
    * Parse BYDAY value
-   * Returns array of strings like ['MO', '2TU', '-1FR'] for compatibility with RecurrenceEngine
+   * Returns array of canonical strings like ['MO', '2TU', '-1FR'] for
+   * compatibility with RecurrenceEngine. Empty list items are ignored.
+   * @throws {Error} If an item is not a valid RFC 5545 weekday value
    * @private
    */
   static parseByDay(value) {
-    const days = value.split(',');
-    const weekDays = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-    const result = [];
+    return value
+      .split(',')
+      .map(day => day.trim())
+      .filter(day => day !== '')
+      .map(day => this.normalizeByDay(day));
+  }
 
-    for (const day of days) {
-      const trimmed = day.trim().toUpperCase();
-      const match = trimmed.match(/^([+-]?\d*)([A-Z]{2})$/);
-      if (match) {
-        const [_, nth, weekday] = match;
-        if (weekDays.includes(weekday)) {
-          // Return string format for RecurrenceEngine compatibility
-          // e.g., 'MO', '2MO', '-1FR'
-          result.push(nth ? `${nth}${weekday}` : weekday);
+  /**
+   * Parse one BYDAY entry into its ordinal and weekday.
+   *
+   * Accepts the RFC 5545 string form ('MO', '2TU', '-1FR', '+1MO', case
+   * insensitive) and the object form ({ nth, weekday }). The weekday must be
+   * one of SU, MO, TU, WE, TH, FR, SA and the ordinal, when present, an
+   * integer from 1 to 53 in either direction; anything else yields null so
+   * callers never operate on an unknown weekday.
+   * @param {string|{nth?: number, weekday: string}} token - BYDAY entry
+   * @returns {{nth: number|null, weekday: string}|null} Parsed entry, or null if invalid
+   */
+  static parseByDayToken(token) {
+    if (token && typeof token === 'object') {
+      const weekday = typeof token.weekday === 'string' ? token.weekday.trim().toUpperCase() : '';
+      if (!WEEKDAY_CODES.includes(weekday)) {
+        return null;
+      }
+      let nth = null;
+      if (token.nth !== undefined && token.nth !== null && token.nth !== 0) {
+        nth = Number(token.nth);
+        if (!Number.isInteger(nth) || Math.abs(nth) > MAX_ORDINAL) {
+          return null;
         }
       }
+      return { nth, weekday };
     }
+    if (typeof token !== 'string') {
+      return null;
+    }
+    const match = BYDAY_TOKEN.exec(token.trim());
+    if (!match) {
+      return null;
+    }
+    const weekday = match[2].toUpperCase();
+    if (!WEEKDAY_CODES.includes(weekday)) {
+      return null;
+    }
+    let nth = null;
+    if (match[1] !== undefined) {
+      nth = parseInt(match[1], 10);
+      if (nth === 0 || Math.abs(nth) > MAX_ORDINAL) {
+        return null;
+      }
+    }
+    return { nth, weekday };
+  }
 
-    return result;
+  /**
+   * Canonical string form of a BYDAY entry: 'MO', '2TU', '-1FR'
+   * @param {string|{nth?: number, weekday: string}} token - BYDAY entry
+   * @returns {string} Canonical entry
+   * @throws {Error} If the entry is not a valid RFC 5545 weekday value
+   * @private
+   */
+  static normalizeByDay(token) {
+    const parsed = this.parseByDayToken(token);
+    if (!parsed) {
+      throw new Error(this.byDayError(token));
+    }
+    return parsed.nth === null ? parsed.weekday : `${parsed.nth}${parsed.weekday}`;
+  }
+
+  /**
+   * @private
+   */
+  static byDayError(token) {
+    const shown = token && typeof token === 'object' ? JSON.stringify(token) : String(token);
+    return (
+      `RRULE BYDAY value "${shown}" is invalid: expected an optional ordinal ` +
+      `(1-${MAX_ORDINAL}, optionally signed) followed by one of ${WEEKDAY_CODES.join(', ')}`
+    );
   }
 
   /**
@@ -230,11 +299,25 @@ export class RRuleParser {
    */
   static validateRule(rule) {
     rule = { ...rule };
-    for (const field of ['byDay', 'bySetPos', 'exceptions']) {
+    for (const field of ['bySetPos', 'exceptions']) {
       if (Array.isArray(rule[field])) {
         rule[field] = [...rule[field]];
       }
     }
+
+    // BYDAY entries are normalised to canonical codes so the engines only
+    // ever see a known weekday (an unknown one cannot be searched for)
+    const byDay = Array.isArray(rule.byDay) ? rule.byDay : rule.byDay ? [rule.byDay] : [];
+    rule.byDay = byDay.map(day => {
+      if (day && typeof day === 'object') {
+        const parsed = this.parseByDayToken(day);
+        if (!parsed) {
+          throw new Error(this.byDayError(day));
+        }
+        return { ...day, weekday: parsed.weekday };
+      }
+      return this.normalizeByDay(day);
+    });
 
     // Ensure frequency is set
     if (!rule.freq) {
