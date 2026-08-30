@@ -12,6 +12,21 @@ const DAY = 86400000;
 // How far ahead of the iteration cursor DST transitions are scanned at a time
 const DST_SCAN_CHUNK = 100 * DAY;
 
+const WEEKDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+// An expansion cut short by MAX_ITERATIONS_HARD_LIMIT is reported once per
+// process rather than on every render
+let iterationLimitWarned = false;
+function warnIterationLimit(eventId) {
+  if (iterationLimitWarned) {
+    return;
+  }
+  iterationLimitWarned = true;
+  console.warn(
+    `RecurrenceEngineV2: expansion of event ${eventId} stopped after ${RecurrenceEngineV2.MAX_ITERATIONS_HARD_LIMIT} steps without reaching the end of the range; results are truncated`
+  );
+}
+
 export class RecurrenceEngineV2 {
   // Hard limit to prevent resource exhaustion regardless of caller input
   static MAX_OCCURRENCES_HARD_LIMIT = 10000;
@@ -39,10 +54,15 @@ export class RecurrenceEngineV2 {
   /**
    * Expand recurring event with advanced handling
    *
-   * Occurrences before rangeStart are skipped without being generated:
-   * daily, weekly, hourly and minutely rules seek straight to the range, so
-   * a series that started years before the queried window is expanded at
-   * the same cost as one that started yesterday.
+   * Occurrences before rangeStart are skipped without being generated for
+   * the rules seekToRange can seek: DAILY (without BYHOUR), WEEKLY (with or
+   * without BYDAY), HOURLY and MINUTELY. Such a series that started years
+   * before the queried window is expanded at the same cost as one that
+   * started yesterday. MONTHLY and YEARLY rules, and DAILY with BYHOUR,
+   * are stepped from DTSTART; they take few enough steps per year that
+   * this is cheap, but an expansion that would need more than
+   * MAX_ITERATIONS_HARD_LIMIT steps is truncated (with one console.warn
+   * per process).
    *
    * @param {import('./Event.js').Event} event - Recurring event
    * @param {Date} rangeStart - Start of expansion range
@@ -145,6 +165,14 @@ export class RecurrenceEngineV2 {
       }
     }
 
+    if (
+      iterations >= RecurrenceEngineV2.MAX_ITERATIONS_HARD_LIMIT &&
+      state.currentDate <= rangeEnd &&
+      occurrences.length < maxOccurrences
+    ) {
+      warnIterationLimit(event.id);
+    }
+
     // Cache results
     this.cacheOccurrences(cacheKey, occurrences);
 
@@ -158,7 +186,7 @@ export class RecurrenceEngineV2 {
    * time and without the expansion cache: stored instance modifications
    * and exceptions are applied as each occurrence is produced, so changes
    * made through addModifiedInstance or addException are visible on the
-   * next pull. Rules seekToRange can seek (plain daily and weekly, hourly,
+   * next pull. Rules seekToRange can seek (daily, weekly, hourly,
    * minutely) jump straight to `after`, and DST transitions are scanned
    * lazily ahead of the cursor instead of for the whole window up front.
    *
@@ -350,6 +378,7 @@ export class RecurrenceEngineV2 {
       }
       idleSteps++;
       if (idleSteps >= RecurrenceEngineV2.MAX_ITERATIONS_HARD_LIMIT) {
+        warnIterationLimit(event.id);
         return;
       }
     }
@@ -392,8 +421,9 @@ export class RecurrenceEngineV2 {
    * without stepping through every occurrence in between.
    *
    * Applies to rules whose step is a fixed duration between system-timezone
-   * transitions (plain DAILY and WEEKLY, HOURLY, MINUTELY); the step that
-   * crosses a transition is taken with getNextDate so the result is exactly
+   * transitions (plain DAILY and WEEKLY, HOURLY, MINUTELY) and to WEEKLY
+   * rules with BYDAY, whose steps repeat in a weekly cycle; the steps that
+   * cross a transition are taken with getNextDate so the result is exactly
    * what stepping from DTSTART would produce. Never seeks past UNTIL, and
    * counts skipped steps against COUNT.
    *
@@ -404,6 +434,10 @@ export class RecurrenceEngineV2 {
    * @param {string} timezone - Expansion timezone
    */
   seekToRange(state, rule, rangeStart, rangeEnd, timezone) {
+    if (rule.freq === 'WEEKLY' && rule.byDay && rule.byDay.length > 0) {
+      this._seekWeekCycle(state, rule, rangeStart, rangeEnd, timezone);
+      return;
+    }
     const stepMs = this.getFixedStepMs(rule);
     if (stepMs <= 0) {
       return;
@@ -431,6 +465,127 @@ export class RecurrenceEngineV2 {
     );
     state.currentDate = new Date(seek.ms);
     state.count = seek.steps;
+  }
+
+  /**
+   * Seek for WEEKLY rules with BYDAY. getNextWeekly picks the next weekday
+   * from the BYDAY list (in list order), so the step from each weekday is
+   * fixed and the walk from DTSTART settles into a cycle of weekdays that
+   * repeats every whole number of weeks. The cursor is stepped one
+   * occurrence at a time until it is on that cycle (at most six steps),
+   * then whole cycles are skipped arithmetically between system-timezone
+   * transitions, exactly as seekToRange does for fixed steps.
+   * @param {Object} state - Expansion state (currentDate and count are updated)
+   * @param {Object} rule - Parsed recurrence rule
+   * @param {Date} rangeStart - Start of expansion range
+   * @param {Date} rangeEnd - End of expansion range
+   * @param {string} timezone - Expansion timezone
+   * @private
+   */
+  _seekWeekCycle(state, rule, rangeStart, rangeEnd, timezone) {
+    const deltas = this._weekdayDeltas(rule);
+    if (!deltas) {
+      return;
+    }
+    let targetMs = rangeStart.getTime();
+    if (rule.until) {
+      const untilMs = new Date(rule.until).getTime();
+      if (untilMs < targetMs) {
+        targetMs = untilMs;
+      }
+    }
+    if (!(state.currentDate.getTime() < targetMs)) {
+      return;
+    }
+    const maxSteps = rule.count ? rule.count - 1 : Infinity;
+
+    // Follow the weekday graph from the cursor until a weekday repeats:
+    // the steps before the repeat lead in to the cycle
+    const path = [];
+    const seen = new Map();
+    let weekday = state.currentDate.getDay();
+    while (!seen.has(weekday)) {
+      seen.set(weekday, path.length);
+      path.push(weekday);
+      weekday = (weekday + deltas[weekday]) % 7;
+    }
+    const leadIn = seen.get(weekday);
+    const cycleSteps = path.length - leadIn;
+    let cycleDays = 0;
+    for (let i = leadIn; i < path.length; i++) {
+      cycleDays += deltas[path[i]];
+    }
+
+    // Lead-in: single steps, identical to the expansion loop's
+    for (let i = 0; i < leadIn; i++) {
+      if (state.count >= maxSteps) {
+        return;
+      }
+      const next = this.getNextDate(state.currentDate, rule, timezone, state);
+      if (!(next.getTime() < targetMs)) {
+        return; // the next step lands in the range; the loop takes it
+      }
+      state.currentDate = next;
+      state.count++;
+    }
+
+    const seek = RecurrenceEngine._seekFixedStep(
+      state.currentDate.getTime(),
+      targetMs,
+      rangeEnd.getTime(),
+      cycleDays * DAY,
+      Math.floor((maxSteps - state.count) / cycleSteps),
+      cursor => {
+        for (let i = 0; i < cycleSteps; i++) {
+          cursor.setTime(this.getNextDate(cursor, rule, timezone, state).getTime());
+        }
+      }
+    );
+    state.currentDate = new Date(seek.ms);
+    state.count += seek.steps * cycleSteps;
+  }
+
+  /**
+   * Days getNextWeekly adds from each weekday (index 0-6) for a WEEKLY
+   * rule with BYDAY, or null when the rule cannot be seeked (an invalid
+   * interval or day code, which the expansion loop handles as before)
+   * @param {Object} rule - Parsed recurrence rule
+   * @returns {number[]|null} Delta table indexed by Date#getDay()
+   * @private
+   */
+  _weekdayDeltas(rule) {
+    const interval = rule.interval;
+    if (!Number.isInteger(interval) || interval <= 0) {
+      return null;
+    }
+    const targets = this._weekdayTargets(rule);
+    if (targets.some(target => target === undefined)) {
+      return null;
+    }
+    const deltas = [];
+    for (let weekday = 0; weekday < 7; weekday++) {
+      const next = targets.find(target => target > weekday);
+      deltas[weekday] =
+        next !== undefined ? next - weekday : 7 - weekday + targets[0] + 7 * (interval - 1);
+    }
+    return deltas;
+  }
+
+  /**
+   * Weekday numbers (Date#getDay) of a rule's BYDAY entries in ascending
+   * order, computed once per parsed rule. Invalid day codes map to
+   * undefined and sort last.
+   * @param {Object} rule - Parsed recurrence rule with byDay
+   * @returns {number[]} Sorted weekday numbers
+   * @private
+   */
+  _weekdayTargets(rule) {
+    if (!rule._weekdayTargets) {
+      rule._weekdayTargets = rule.byDay
+        .map(byDay => WEEKDAYS[byDay.weekday || byDay])
+        .sort((a, b) => (a === undefined) - (b === undefined) || a - b);
+    }
+    return rule._weekdayTargets;
   }
 
   /**
@@ -556,33 +711,16 @@ export class RecurrenceEngineV2 {
     const next = new Date(date);
 
     if (rule.byDay && rule.byDay.length > 0) {
-      // Find next matching weekday
-      const dayMap = {
-        SU: 0,
-        MO: 1,
-        TU: 2,
-        WE: 3,
-        TH: 4,
-        FR: 5,
-        SA: 6
-      };
-
+      // BYDAY is a set: the next weekday in it after the current one, or the
+      // earliest one INTERVAL weeks on when the week has none left
+      const targets = this._weekdayTargets(rule);
       const currentDay = next.getDay();
-      let daysToAdd = null;
-
-      // Find next occurrence day
-      for (const byDay of rule.byDay) {
-        const targetDay = dayMap[byDay.weekday || byDay];
-        if (targetDay > currentDay) {
-          daysToAdd = targetDay - currentDay;
-          break;
-        }
-      }
-
-      // If no day found in current week, go to next week
-      if (daysToAdd === null) {
-        const firstDay = dayMap[rule.byDay[0].weekday || rule.byDay[0]];
-        daysToAdd = 7 - currentDay + firstDay;
+      const nextDay = targets.find(target => target > currentDay);
+      let daysToAdd;
+      if (nextDay !== undefined) {
+        daysToAdd = nextDay - currentDay;
+      } else {
+        daysToAdd = 7 - currentDay + targets[0];
 
         // Apply interval for weekly recurrence
         if (rule.interval > 1) {
