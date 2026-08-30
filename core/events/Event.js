@@ -42,6 +42,33 @@ function deepEqual(a, b) {
   return true;
 }
 
+/**
+ * Timezone identifiers Intl has already accepted. Every Event construction
+ * (each clone, each occurrence of a recurring series) validates its
+ * timezone, and constructing an Intl.DateTimeFormat per event dominated
+ * the cost of expanding a month grid.
+ * @type {Set<string>}
+ */
+const validatedTimezones = new Set();
+
+/**
+ * Throw unless Intl accepts the timezone identifier
+ * @param {string} timezone - IANA timezone identifier
+ * @param {string} label - Field name for the error message
+ * @throws {Error} If the timezone is not valid
+ */
+function assertValidTimezone(timezone, label) {
+  if (validatedTimezones.has(timezone)) {
+    return;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+  } catch (e) {
+    throw new Error(`Invalid ${label}: ${timezone}`, { cause: e });
+  }
+  validatedTimezones.add(timezone);
+}
+
 export class Event {
   // Field size limits
   static FIELD_LIMITS = {
@@ -204,22 +231,12 @@ export class Event {
       });
     }
 
-    // Validate timezone if provided
+    // Validate timezones if provided (memoised per identifier)
     if (data.timeZone) {
-      try {
-        new Intl.DateTimeFormat('en-US', { timeZone: data.timeZone });
-      } catch (e) {
-        throw new Error(`Invalid timezone: ${data.timeZone}`, { cause: e });
-      }
+      assertValidTimezone(data.timeZone, 'timezone');
     }
-
-    // Validate end timezone if provided
     if (data.endTimeZone) {
-      try {
-        new Intl.DateTimeFormat('en-US', { timeZone: data.endTimeZone });
-      } catch (e) {
-        throw new Error(`Invalid end timezone: ${data.endTimeZone}`, { cause: e });
-      }
+      assertValidTimezone(data.endTimeZone, 'end timezone');
     }
   }
 
