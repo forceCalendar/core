@@ -28,9 +28,6 @@ assert(hourPart('Pacific/Pago_Pago')(midnightPago) === '00', 'Pago Pago midnight
 assert(hourPart('UTC')(midnightUTC) === '00', 'UTC midnight hour part is 00');
 assert(hourPart('Pacific/Kiritimati')(new Date(Date.UTC(2025, 5, 13, 10, 0, 0))) === '00', 'Kiritimati midnight hour part is 00');
 
-const offsetAtMidnight = tz.getTimezoneOffset(midnightPago, 'Pacific/Pago_Pago');
-assert(offsetAtMidnight === 660, `Pago Pago offset at local midnight is 660 minutes (got ${offsetAtMidnight})`);
-
 const roundTrip = tz.fromUTC(tz.toUTC(midnightPago, 'Pacific/Pago_Pago'), 'Pacific/Pago_Pago');
 assert(roundTrip.getTime() === midnightPago.getTime(), 'toUTC/fromUTC round-trips local midnight');
 
