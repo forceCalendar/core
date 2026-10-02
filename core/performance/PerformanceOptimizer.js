@@ -8,6 +8,7 @@ import { AdaptiveMemoryManager } from './AdaptiveMemoryManager.js';
 
 export class PerformanceOptimizer {
   constructor(config = {}) {
+    this._destroyed = false;
     // Configuration
     this.config = {
       enableCache: true,
@@ -60,6 +61,7 @@ export class PerformanceOptimizer {
     // Lazy loading tracking
     this.lazyIndexes = new Map(); // eventId -> Set of date strings
     this.pendingIndexes = new Map(); // eventId -> Promise
+    this.pendingIndexTasks = new Set(); // Independent tasks survive replacement of an event's markers
 
     // Batch processing
     this.batchQueue = [];
@@ -259,6 +261,10 @@ export class PerformanceOptimizer {
    * @returns {Promise<Set<string>>} Indexed date strings
    */
   async expandLazyIndex(eventId, rangeStart, rangeEnd) {
+    if (this._destroyed) {
+      throw new Error('PerformanceOptimizer has been destroyed');
+    }
+
     const markers = this.lazyIndexes.get(eventId);
     if (!markers) {
       return new Set();
@@ -271,9 +277,17 @@ export class PerformanceOptimizer {
 
     markers.pending = true;
 
-    const promise = new Promise(resolve => {
+    const promise = new Promise((resolve, reject) => {
+      const task = {
+        timer: null,
+        cancel: error => {
+          markers.pending = false;
+          reject(error);
+        }
+      };
       // Simulate async indexing (in real app, could be in worker)
-      setTimeout(() => {
+      task.timer = setTimeout(() => {
+        if (this._destroyed) return;
         const indexed = new Set();
         const current = new Date(rangeStart);
 
@@ -287,9 +301,13 @@ export class PerformanceOptimizer {
         }
 
         markers.pending = false;
-        this.pendingIndexes.delete(eventId);
+        if (this.pendingIndexes.get(eventId) === promise) {
+          this.pendingIndexes.delete(eventId);
+        }
+        this.pendingIndexTasks.delete(task);
         resolve(indexed);
       }, 0);
+      this.pendingIndexTasks.add(task);
     });
 
     this.pendingIndexes.set(eventId, promise);
@@ -398,13 +416,17 @@ export class PerformanceOptimizer {
    * @returns {Promise} Batch result
    */
   batch(operation) {
+    if (this._destroyed) {
+      return Promise.reject(new Error('PerformanceOptimizer has been destroyed'));
+    }
+
     return new Promise((resolve, reject) => {
       this.batchQueue.push(operation);
       this.batchCallbacks.push({ resolve, reject });
 
       if (this.batchQueue.length >= this.config.batchSize) {
         this.processBatch();
-      } else if (!this.batchTimer) {
+      } else if (this.batchTimer === null) {
         // Process batch after 10ms if not full
         this.batchTimer = setTimeout(() => this.processBatch(), 10);
       }
@@ -416,7 +438,9 @@ export class PerformanceOptimizer {
    * @private
    */
   processBatch() {
-    if (this.batchTimer) {
+    if (this._destroyed) return;
+
+    if (this.batchTimer !== null) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
@@ -431,6 +455,12 @@ export class PerformanceOptimizer {
     const errors = [];
 
     operations.forEach((op, index) => {
+      // An earlier operation can destroy the optimizer after the queue was
+      // detached. Do not execute the remaining operations in that case.
+      if (this._destroyed) {
+        errors[index] = new Error('PerformanceOptimizer has been destroyed');
+        return;
+      }
       try {
         results[index] = op();
       } catch (error) {
@@ -453,7 +483,10 @@ export class PerformanceOptimizer {
    * @private
    */
   startCleanupTimer() {
+    if (this._destroyed || this.cleanupTimer !== null) return;
+
     this.cleanupTimer = setInterval(() => {
+      if (this._destroyed) return;
       this.cleanupOldIndexes();
     }, this.config.cleanupInterval);
   }
@@ -499,18 +532,36 @@ export class PerformanceOptimizer {
   }
 
   /**
-   * Destroy optimizer and clean up resources
+   * Destroy optimizer and clean up resources. Pending batch and lazy-index
+   * promises reject because their operations will no longer run.
    */
   destroy() {
-    if (this.cleanupTimer) {
+    if (this._destroyed) return;
+    this._destroyed = true;
+
+    if (this.cleanupTimer !== null) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
 
-    if (this.batchTimer) {
+    if (this.batchTimer !== null) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
+
+    this.memoryManager?.destroy();
+
+    const error = new Error('PerformanceOptimizer has been destroyed');
+    for (const task of this.pendingIndexTasks.values()) {
+      clearTimeout(task.timer);
+      task.cancel(error);
+    }
+    this.pendingIndexTasks.clear();
+    for (const callback of this.batchCallbacks) {
+      callback.reject(error);
+    }
+    this.batchCallbacks.length = 0;
+    this.batchQueue.length = 0;
 
     this.eventCache.clear();
     this.queryCache.clear();

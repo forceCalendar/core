@@ -7,8 +7,14 @@ import { Calendar } from '../calendar/Calendar.js';
 import { SearchWorkerManager } from '../search/SearchWorkerManager.js';
 import { RecurrenceEngineV2 } from '../events/RecurrenceEngineV2.js';
 
+/**
+ * @extends {Calendar<import('../types.js').EnhancedCalendarOccurrence>}
+ */
 export class EnhancedCalendar extends Calendar {
-  constructor(config) {
+  /**
+   * @param {import('../types.js').CalendarConfig} [config={}] - Configuration options
+   */
+  constructor(config = {}) {
     super(config);
 
     // Initialize enhanced components
@@ -98,15 +104,22 @@ export class EnhancedCalendar extends Calendar {
    * engine's plain occurrence objects, with the id `<masterId>_<startMs>`
    * (see `Event.occurrenceId`), `recurringEventId`, `isOccurrence: true` and
    * `occurrenceStart`.
+   * @param {Date|string|number} startDate - Start of the range
+   * @param {Date|string|number} endDate - End of the range
+   * @param {import('../types.js').EnhancedRangeOptions|string} [options={}] - Expansion options, or a timezone as in Calendar
+   * @returns {(import('../events/Event.js').Event|import('../types.js').EnhancedCalendarOccurrence)[]}
    */
   getEventsInRange(startDate, endDate, options = {}) {
+    if (typeof options === 'string') {
+      options = { timezone: options };
+    }
     const startTime = performance.now();
     const rangeStart = new Date(startDate);
     const rangeEnd = new Date(endDate);
 
     // Recurring masters are represented by their occurrences below
     const regularEvents = this.eventStore
-      .getEventsInRange(rangeStart, rangeEnd, false)
+      .getEventsInRange(rangeStart, rangeEnd, false, options.timezone)
       .filter(event => !event.recurring);
 
     // A series that started before the range can still occur inside it, so

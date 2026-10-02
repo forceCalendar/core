@@ -9,7 +9,8 @@
   "types": "./types/index.d.ts",
   "sideEffects": false,
   "scripts": {
-    "test": "node tests/run-all.js",
+    "test": "npm run test:types && node tests/run-all.js",
+    "test:types": "npm run build:types && tsc -p tests/declarations/tsconfig.json",
     "test:ics": "node tests/integration/test-ics.js",
     "test:search": "node tests/integration/test-search.js",
     "lint": "eslint core/",
