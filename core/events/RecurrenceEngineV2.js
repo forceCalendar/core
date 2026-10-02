@@ -56,7 +56,7 @@ export class RecurrenceEngineV2 {
    *
    * Occurrences before rangeStart are skipped without being generated for
    * the rules seekToRange can seek: DAILY (without BYHOUR), WEEKLY (with or
-   * without BYDAY), HOURLY and MINUTELY. Such a series that started years
+   * without BYDAY), HOURLY, MINUTELY and SECONDLY. Such a series that started years
    * before the queried window is expanded at the same cost as one that
    * started yesterday. MONTHLY and YEARLY rules, and DAILY with BYHOUR,
    * are stepped from DTSTART; they take few enough steps per year that
@@ -187,7 +187,7 @@ export class RecurrenceEngineV2 {
    * and exceptions are applied as each occurrence is produced, so changes
    * made through addModifiedInstance or addException are visible on the
    * next pull. Rules seekToRange can seek (daily, weekly, hourly,
-   * minutely) jump straight to `after`, and DST transitions are scanned
+   * minutely, secondly) jump straight to `after`, and DST transitions are scanned
    * lazily ahead of the cursor instead of for the whole window up front.
    *
    * Both bounds are exclusive unless `inclusive` is set: an occurrence that
@@ -421,7 +421,7 @@ export class RecurrenceEngineV2 {
    * without stepping through every occurrence in between.
    *
    * Applies to rules whose step is a fixed duration between system-timezone
-   * transitions (plain DAILY and WEEKLY, HOURLY, MINUTELY) and to WEEKLY
+   * transitions (plain DAILY and WEEKLY, HOURLY, MINUTELY, SECONDLY) and to WEEKLY
    * rules with BYDAY, whose steps repeat in a weekly cycle; the steps that
    * cross a transition are taken with getNextDate so the result is exactly
    * what stepping from DTSTART would produce. Never seeks past UNTIL, and
@@ -611,6 +611,8 @@ export class RecurrenceEngineV2 {
         return interval * 3600000;
       case 'MINUTELY':
         return interval * 60000;
+      case 'SECONDLY':
+        return interval * 1000;
       default:
         return 0;
     }
@@ -675,6 +677,10 @@ export class RecurrenceEngineV2 {
 
       case 'MINUTELY':
         next.setMinutes(next.getMinutes() + rule.interval);
+        return next;
+
+      case 'SECONDLY':
+        next.setSeconds(next.getSeconds() + rule.interval);
         return next;
 
       default:
