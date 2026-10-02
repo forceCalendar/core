@@ -7,3 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A modern, lightweight, framework-agnostic calendar engine optimized for Salesforce.
+
+## Project resources
+
+- [Contributing guide](CONTRIBUTING.md): setup, tests, architecture and release policy
+- [Changelog](CHANGELOG.md): notable changes and verified release history
+- [Roadmap](ROADMAP.md): current priorities across forceCalendar
