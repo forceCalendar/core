@@ -2,8 +2,9 @@
 
 RecurrenceEngineV2 uses options.timezone, then event.timeZone, then UTC to
 interpret its calendar steps. The timestamp in event.start anchors the series.
-Returned start and end values are occurrence instants. Identical timestamps,
-rules and event zones produce identical occurrence instants on different hosts.
+Generated start and end values are occurrence instants. The recurrence zone,
+rather than the host zone, controls their calendar steps. Stored instance
+overrides are applied afterward.
 
 Daily, weekly, monthly, yearly and subdaily rules retain their existing calendar
 setter behavior in the recurrence zone. Across a forward clock change, a missing
@@ -11,12 +12,17 @@ local time advances by the gap; that adjusted time carries into later steps.
 Across a backward change, an ambiguous local time uses the earlier instant.
 These are native Date setter semantics, including when the event zone is the
 host zone. Subdaily rules are calendar increments, not a guarantee of constant
-elapsed durations across a transition. Each occurrence's duration remains the
-original end minus start in milliseconds.
+elapsed durations across a transition. Before instance overrides, each
+occurrence's duration remains the original end minus start in milliseconds.
+An override that changes start or end can also change its duration.
 
 Seeking uses transitions in the recurrence zone. Range bounds and iterator
-bounds compare the resulting instants, without a second DST correction. Floating
-UNTIL and EXDATE values in RRULE strings use the recurrence zone; values ending
+bounds compare generated recurrence instants before instance overrides, without
+a second DST correction. An occurrence moved outside the requested window by an
+override can still be returned; overrides can also change the iterator's output
+order. These override semantics are unchanged.
+
+Floating UNTIL and EXDATE values in RRULE strings use the recurrence zone; values ending
 in Z remain UTC. Existing date-based exception and modification matching uses
 the occurrence's calendar date in that zone. The default event zone participates
 in expansion cache keys.
@@ -38,6 +44,16 @@ The supported RRULE fields and their existing selection behavior are retained;
 this change does not add RFC 5545 feature completeness or redefine month-end
 selection. The legacy RecurrenceEngine remains unchanged apart from an optional
 internal transition lookup used by V2's shared arithmetic seek.
+
+Stepping helpers such as getNextDate now reject an unknown explicit timezone,
+consistent with using that timezone for calendar arithmetic. Previously these
+helpers ignored the zone; expansion already rejected unknown zones. Calls that
+omit the timezone retain local Date behavior.
+
+Ancient-date support remains limited: year 0000/BCE can produce host-dependent
+results because offset extraction does not handle the Intl era field. UTC-suffixed
+RRULE dates in years 0000–0099 still inherit the legacy parser's 1900-year remapping.
+The cross-host guarantee is not a claim that these ancient-date cases are fixed.
 
 ## Regression coverage
 
