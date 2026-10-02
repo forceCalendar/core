@@ -131,7 +131,8 @@ function bruteForceV2(event, rangeStart, rangeEnd) {
 console.log('\n=== Test 3: Series older than the occurrence cap stay visible ===');
 const june2025Start = new Date(2025, 5, 1);
 const june2025End = new Date(2025, 5, 30, 23, 59);
-const dailySince2024 = makeRecurring('old-daily', 'FREQ=DAILY', new Date(2024, 0, 1, 9, 0));
+// These assertions inspect host-local fields, so make the event zone explicit.
+const dailySince2024 = makeRecurring('old-daily', 'FREQ=DAILY', new Date(2024, 0, 1, 9, 0), 60, Intl.DateTimeFormat().resolvedOptions().timeZone);
 
 const v1Default = RecurrenceEngine.expandEvent(dailySince2024, june2025Start, june2025End);
 assert(v1Default.length === 30, `RecurrenceEngine default cap returns June 2025 for a 2024 daily series (${v1Default.length})`);

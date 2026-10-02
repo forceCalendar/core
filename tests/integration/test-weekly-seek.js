@@ -5,7 +5,6 @@
  */
 
 import { Event } from '../../core/events/Event.js';
-import { RecurrenceEngine } from '../../core/events/RecurrenceEngine.js';
 import { RecurrenceEngineV2 } from '../../core/events/RecurrenceEngineV2.js';
 
 console.log('Testing WEEKLY BYDAY seeking...\n');
@@ -110,8 +109,10 @@ console.log('\n=== Test 2: far-past WEEKLY BYDAY series ===');
     assert(elapsed < 100, `Expanded in ${elapsed.toFixed(1)} ms`);
     assert(warnings.length === 0, 'No truncation warning');
 
-    const v1 = RecurrenceEngine.expandEvent(event, new Date(2025, 5, 1), new Date(2025, 5, 30, 23, 59, 59, 999), 1000);
-    assert(signature(v1.map(o => ({ id: 'e', ...o }))) === signature(june.map(o => ({ ...o, id: 'e' }))), 'RecurrenceEngine agrees');
+    // The legacy engine has separate historical offset behavior. Use native
+    // calendar instants as the oracle for the named host zone instead.
+    const expected = Array.from({ length: 30 }, (_, day) => new Date(2025, 5, day + 1, 9).getTime());
+    assert(JSON.stringify(june.map(o => o.start.getTime())) === JSON.stringify(expected), 'Ancient weekly series matches native local dates');
 
     const next = engine.nextOccurrence(makeEvent('FREQ=WEEKLY;BYDAY=MO,WE', new Date(1995, 0, 2, 9)), new Date(2300, 0, 1));
     assert(next && next.start.getFullYear() === 2300 && [1, 3].includes(next.start.getDay()), 'nextOccurrence seeks a BYDAY series 300 years ahead');

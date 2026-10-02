@@ -383,7 +383,7 @@
  * @property {string} [timezone] - Timezone for expansion (defaults to the event's)
  * @property {boolean} [includeModified=true] - Apply stored instance modifications
  * @property {boolean} [includeCancelled=false] - Yield exception dates as cancelled occurrences
- * @property {boolean} [handleDST=true] - Adjust occurrences across DST transitions
+ * @property {boolean} [handleDST=true] - Compatibility option; V2 always resolves calendar steps in the recurrence zone without an extra DST shift
  */
 
 /**
@@ -420,7 +420,7 @@
  * @property {boolean} [includeModified=true] - Apply stored instance modifications
  * @property {boolean} [includeCancelled=false] - Include cancelled occurrences
  * @property {string} [timezone] - Timezone for expansion (defaults to the event's)
- * @property {boolean} [handleDST=true] - Adjust occurrences across DST transitions
+ * @property {boolean} [handleDST=true] - Compatibility option; V2 always resolves calendar steps in the recurrence zone without an extra DST shift
  */
 
 /**

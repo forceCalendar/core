@@ -725,14 +725,23 @@ export class RecurrenceEngine {
    * @param {number} stepMs - Step length while the UTC offset is constant
    * @param {number} maxSteps - Steps still permitted under COUNT (Infinity if unbounded)
    * @param {(cursor: Date) => void} advance - Wall-clock step, mutating the cursor
+   * @param {(from: number, to: number) => number} [nextTransition] - Offset-transition lookup; defaults to the host zone
    * @returns {{ ms: number, steps: number, nextSystemTransition: number }}
    *   Cursor position, steps taken and the next system transition after it
    * @private
    */
-  static _seekFixedStep(fromMs, rangeStartMs, rangeEndMs, stepMs, maxSteps, advance) {
+  static _seekFixedStep(
+    fromMs,
+    rangeStartMs,
+    rangeEndMs,
+    stepMs,
+    maxSteps,
+    advance,
+    nextTransition = (from, to) => this._nextSystemTransition(from, to)
+  ) {
     let ms = fromMs;
     let steps = 0;
-    let nextSystemTransition = this._nextSystemTransition(ms, rangeEndMs);
+    let nextSystemTransition = nextTransition(ms, rangeEndMs);
     if (!Number.isFinite(rangeStartMs) || !(stepMs > 0)) {
       return { ms, steps, nextSystemTransition };
     }
@@ -758,7 +767,7 @@ export class RecurrenceEngine {
       advance(cursor);
       ms = cursor.getTime();
       steps++;
-      nextSystemTransition = this._nextSystemTransition(ms, rangeEndMs);
+      nextSystemTransition = nextTransition(ms, rangeEndMs);
     }
     return { ms, steps, nextSystemTransition };
   }

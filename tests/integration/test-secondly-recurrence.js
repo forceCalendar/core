@@ -125,14 +125,17 @@ if (process.argv[2] !== '--timezone-child') {
         steps++;
         return getNextDate.apply(this, args);
     };
-    const oldExpected = RecurrenceEngine.expandEvent(oldEvent, start, at(60), 5);
-    assert.equal(oldExpected.length, 5, 'V1 old-series oracle returns five occurrences');
+    // Explicit UTC recurrence is independent of the host's Date setters.
+    // V1 still uses host-local stepping, so use integer UTC arithmetic as
+    // the independent oracle rather than comparing the two engines here.
+    const firstOld = oldEvent.start.getTime() + Math.ceil((start - oldEvent.start) / 7000) * 7000;
+    const oldExpected = Array.from({ length: 5 }, (_, i) => new Date(firstOld + i * 7000));
     assertStarts(oldEngine.expandEvent(oldEvent, start, at(60), { maxOccurrences: 5 }),
-        oldExpected.map(occurrence => occurrence.start), 'decades-old expansion');
+        oldExpected, 'decades-old expansion');
     assert.ok(steps < 200, `old expansion uses bounded seeking (${steps} steps)`);
     steps = 0;
     assertStarts(oldEngine.takeOccurrences(oldEvent, 5, { after: start, inclusive: true }),
-        oldExpected.map(occurrence => occurrence.start), 'decades-old iterator');
+        oldExpected, 'decades-old iterator');
     assert.ok(steps < 200, `old iterator uses bounded seeking (${steps} steps)`);
     const exhaustedOldEvent = makeEvent('FREQ=SECONDLY;COUNT=100', oldEvent.start);
     assertStarts(oldEngine.expandEvent(exhaustedOldEvent, start, at(60)), [], 'old COUNT is exhausted before range');

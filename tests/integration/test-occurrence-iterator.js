@@ -186,7 +186,8 @@ for (const [name, iterate] of [
 
 console.log('\n=== Test 3: Open-ended iteration stops at COUNT and UNTIL ===');
 const counted = makeRecurring('counted', 'FREQ=DAILY;COUNT=10', new Date(2025, 5, 1, 9, 0));
-const untilSeries = makeRecurring('until', 'FREQ=DAILY;UNTIL=20250615T090000', new Date(2025, 5, 1, 9, 0));
+// This test compares local clock fields with V1; use the host as the event zone.
+const untilSeries = makeRecurring('until', 'FREQ=DAILY;UNTIL=20250615T090000', new Date(2025, 5, 1, 9, 0), 60, Intl.DateTimeFormat().resolvedOptions().timeZone);
 const countedAll = Array.from(RecurrenceEngine.iterateOccurrences(counted));
 assert(countedAll.length === 10, `RecurrenceEngine: unbounded iteration ends at COUNT (${countedAll.length})`);
 const countedAllV2 = Array.from(engineV2.iterateOccurrences(counted));
