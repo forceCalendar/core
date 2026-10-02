@@ -121,16 +121,21 @@ export class TimezoneManager {
    * Get timezone offset in minutes
    * @param {Date} date - Date to check (for DST calculation)
    * @param {string} timezone - Timezone identifier
+   * @param {boolean} [absolute=false] - Read the absolute zone offset instead of the legacy host-relative offset
    * @returns {number} Offset in minutes from UTC
    */
-  getTimezoneOffset(date, timezone) {
+  getTimezoneOffset(date, timezone, absolute = false) {
     // Resolve any aliases
     timezone = this.database.resolveAlias(timezone);
+    if (absolute && timezone === 'UTC') {
+      return 0;
+    }
 
     // Offsets only change at DST transitions, which occur on 15-minute UTC
     // boundaries worldwide — one cached entry covers each 15-minute bucket
     const bucket = Math.floor(date.getTime() / 900000);
-    let zoneCache = this.offsetCache.get(timezone);
+    const cacheKey = absolute ? `${timezone}|absolute` : timezone;
+    let zoneCache = this.offsetCache.get(cacheKey);
     if (zoneCache) {
       const cached = zoneCache.get(bucket);
       if (cached !== undefined) {
@@ -139,7 +144,7 @@ export class TimezoneManager {
       }
     } else {
       zoneCache = new Map();
-      this.offsetCache.set(timezone, zoneCache);
+      this.offsetCache.set(cacheKey, zoneCache);
     }
 
     this.cacheMisses++;
@@ -174,7 +179,15 @@ export class TimezoneManager {
               break;
           }
         }
-        const tzDate = new Date(year, month - 1, day, hour, minute, second);
+        const tzDate = absolute
+          ? new Date(0)
+          : new Date(year, month - 1, day, hour, minute, second);
+        if (absolute) {
+          // Calendar arithmetic needs a true UTC offset, independent of the
+          // host. Keep the legacy wall-clock conversion mode for existing callers.
+          tzDate.setUTCFullYear(year, month - 1, day);
+          tzDate.setUTCHours(hour, minute, second, 0);
+        }
         // formatToParts carries no milliseconds, so compare against the
         // whole-second part of the input or sub-second noise leaks into
         // the offset (e.g. 660.0042 instead of 660)
@@ -212,32 +225,37 @@ export class TimezoneManager {
    * @param {string} timezone - Timezone identifier
    * @param {number} fromMs - Search from this timestamp (exclusive)
    * @param {number} toMs - Search up to this timestamp (inclusive)
+   * @param {boolean} [absolute=false] - Find transitions of the absolute zone offset
    * @returns {number} Timestamp of the first offset change after fromMs, or Infinity
    */
-  getNextTransition(timezone, fromMs, toMs) {
+  getNextTransition(timezone, fromMs, toMs, absolute = false) {
     if (fromMs >= toMs) {
       return Infinity;
     }
     timezone = this.database.resolveAlias(timezone);
-    let cached = this.transitionCache.get(timezone);
+    if (absolute && timezone === 'UTC') {
+      return Infinity;
+    }
+    const cacheKey = absolute ? `${timezone}|absolute` : timezone;
+    let cached = this.transitionCache.get(cacheKey);
     if (!cached) {
       cached = {
         from: fromMs,
         to: toMs,
-        transitions: this._scanTransitions(timezone, fromMs, toMs)
+        transitions: this._scanTransitions(timezone, fromMs, toMs, absolute)
       };
-      this.transitionCache.set(timezone, cached);
+      this.transitionCache.set(cacheKey, cached);
     } else {
       // Extend coverage incrementally so only the uncovered span is scanned
       if (fromMs < cached.from) {
-        cached.transitions = this._scanTransitions(timezone, fromMs, cached.from).concat(
+        cached.transitions = this._scanTransitions(timezone, fromMs, cached.from, absolute).concat(
           cached.transitions
         );
         cached.from = fromMs;
       }
       if (toMs > cached.to) {
         cached.transitions = cached.transitions.concat(
-          this._scanTransitions(timezone, cached.to, toMs)
+          this._scanTransitions(timezone, cached.to, toMs, absolute)
         );
         cached.to = toMs;
       }
@@ -270,10 +288,10 @@ export class TimezoneManager {
    * @returns {number[]} Sorted transition timestamps
    * @private
    */
-  _scanTransitions(timezone, fromMs, toMs) {
+  _scanTransitions(timezone, fromMs, toMs, absolute = false) {
     const WEEK = 7 * 86400000;
     const transitions = [];
-    const offsetAt = ms => this.getTimezoneOffset(new Date(ms), timezone);
+    const offsetAt = ms => this.getTimezoneOffset(new Date(ms), timezone, absolute);
     let lo = fromMs;
     let loOffset = offsetAt(lo);
     // Timezone databases know only local mean time before the 19th century:

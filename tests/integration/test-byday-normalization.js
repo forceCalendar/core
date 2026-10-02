@@ -32,7 +32,7 @@ if (process.argv[2] === '--expand') {
         end: new Date(start.getTime() + 3600000),
         recurring: true,
         recurrenceRule: rule,
-        timeZone: 'UTC'
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     };
     const rangeStart = new Date(2025, 0, 1);
     const rangeEnd = new Date(2025, 11, 31, 23, 59, 59);
@@ -180,7 +180,7 @@ assert(
     v1Next.getFullYear() === 2025 && v1Next.getMonth() === 1 && v1Next.getDate() === 3 && v1Next.getDay() === 1,
     'RecurrenceEngine advances +1MO to the first Monday of the next month'
 );
-const v2Next = new RecurrenceEngineV2().getNextMonthly(new Date(2025, 0, 6, 9, 0), rawRule, 'UTC');
+const v2Next = new RecurrenceEngineV2().getNextMonthly(new Date(2025, 0, 6, 9, 0), rawRule, Intl.DateTimeFormat().resolvedOptions().timeZone);
 assert(
     v2Next.getFullYear() === 2025 && v2Next.getMonth() === 1 && v2Next.getDate() === 3 && v2Next.getDay() === 1,
     'RecurrenceEngineV2 advances +1MO to the first Monday of the next month'

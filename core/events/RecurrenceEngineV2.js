@@ -6,11 +6,9 @@
 import { TimezoneManager } from '../timezone/TimezoneManager.js';
 import { RecurrenceEngine } from './RecurrenceEngine.js';
 import { RRuleParser } from './RRuleParser.js';
+import { RecurrenceDate } from './RecurrenceDate.js';
 
 const DAY = 86400000;
-
-// How far ahead of the iteration cursor DST transitions are scanned at a time
-const DST_SCAN_CHUNK = 100 * DAY;
 
 const WEEKDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
 
@@ -39,6 +37,7 @@ export class RecurrenceEngineV2 {
   constructor() {
     // Use singleton to share cache across all components
     this.tzManager = TimezoneManager.getInstance();
+    this.systemTimezone = this.tzManager.getSystemTimezone();
 
     // Cache for expanded occurrences
     this.occurrenceCache = new Map();
@@ -73,7 +72,8 @@ export class RecurrenceEngineV2 {
    * @param {boolean} [options.includeModified=true] - Apply stored instance modifications
    * @param {boolean} [options.includeCancelled=false] - Return exception dates as cancelled occurrences
    * @param {string} [options.timezone] - Timezone for expansion (defaults to the event's)
-   * @param {boolean} [options.handleDST=true] - Adjust occurrences across DST transitions
+   * @param {boolean} [options.handleDST=true] - Compatibility option. Calendar stepping
+   *   always resolves transitions in the recurrence zone; no extra DST shift is applied.
    * @returns {import('../types.js').ExpandedOccurrence[]} Expanded occurrences
    */
   expandEvent(event, rangeStart, rangeEnd, options = {}) {
@@ -81,8 +81,7 @@ export class RecurrenceEngineV2 {
       maxOccurrences: requestedMax = 365,
       includeModified = true,
       includeCancelled = false,
-      timezone = event.timeZone || 'UTC',
-      handleDST = true
+      timezone = event.timeZone || 'UTC'
     } = options;
 
     // Enforce hard limit regardless of caller-provided value
@@ -98,7 +97,7 @@ export class RecurrenceEngineV2 {
       return this.cloneOccurrences([this.createOccurrence(event, event.start, event.end)]);
     }
 
-    const rule = RRuleParser.parse(event.recurrenceRule);
+    const rule = this._parseRule(event.recurrenceRule, timezone);
     const occurrences = [];
     const duration = event.end - event.start;
 
@@ -107,15 +106,8 @@ export class RecurrenceEngineV2 {
     const state = {
       currentDate: new Date(event.start),
       count: 0,
-      tzOffsets: new Map(),
-      dstTransitions: [],
       stuckIterations: 0
     };
-
-    // Pre-calculate DST transitions in range
-    if (handleDST) {
-      state.dstTransitions = this.findDSTTransitions(rangeStart, rangeEnd, timezone);
-    }
 
     this.seekToRange(state, rule, rangeStart, rangeEnd, timezone);
 
@@ -133,7 +125,8 @@ export class RecurrenceEngineV2 {
           this.generateOccurrence(event, state.currentDate, duration, timezone, state),
           rule,
           includeCancelled,
-          includeModified
+          includeModified,
+          timezone
         );
         if (occurrence) {
           occurrences.push(occurrence);
@@ -187,8 +180,8 @@ export class RecurrenceEngineV2 {
    * and exceptions are applied as each occurrence is produced, so changes
    * made through addModifiedInstance or addException are visible on the
    * next pull. Rules seekToRange can seek (daily, weekly, hourly,
-   * minutely, secondly) jump straight to `after`, and DST transitions are scanned
-   * lazily ahead of the cursor instead of for the whole window up front.
+   * minutely, secondly) jump straight to `after` using transitions in the
+   * recurrence zone. No post-generation DST correction is applied.
    *
    * Both bounds are exclusive unless `inclusive` is set: an occurrence that
    * starts exactly at `after` or `before` is skipped by default, so
@@ -220,14 +213,12 @@ export class RecurrenceEngineV2 {
     const {
       includeModified = true,
       includeCancelled = false,
-      timezone = event.timeZone || 'UTC',
-      handleDST = true
+      timezone = event.timeZone || 'UTC'
     } = options;
-    return this._iterateRule(event, RRuleParser.parse(event.recurrenceRule), window, {
+    return this._iterateRule(event, this._parseRule(event.recurrenceRule, timezone), window, {
       includeModified,
       includeCancelled,
-      timezone,
-      handleDST
+      timezone
     });
   }
 
@@ -298,34 +289,20 @@ export class RecurrenceEngineV2 {
 
   /**
    * Lazy counterpart of the expandEvent loop: seeks to the window, then
-   * steps the cursor and yields each in-window occurrence with the same
-   * DST adjustment, exception handling and instance modifications.
+   * steps the zoned cursor and yields each in-window occurrence with the
+   * same exception handling and instance modifications.
    * @private
    */
   *_iterateRule(event, rule, window, options) {
-    const { includeModified, includeCancelled, timezone, handleDST } = options;
+    const { includeModified, includeCancelled, timezone } = options;
     const duration = event.end - event.start;
     const state = {
       currentDate: new Date(event.start),
       count: 0,
-      tzOffsets: new Map(),
-      dstTransitions: [],
       stuckIterations: 0
     };
     if (Number.isNaN(state.currentDate.getTime()) || window.startMs > window.endMs) {
       return;
-    }
-
-    // DST transitions are found on the same day grid expandEvent walks,
-    // starting from the window start (DTSTART for an open window) and
-    // extended in chunks ahead of the cursor
-    let dstScan = null;
-    if (handleDST) {
-      const scanStart = Number.isFinite(window.startMs)
-        ? window.startMs
-        : state.currentDate.getTime();
-      dstScan = { cursor: new Date(scanStart), lastOffset: 0 };
-      dstScan.lastOffset = this.tzManager.getTimezoneOffset(dstScan.cursor, timezone);
     }
 
     if (Number.isFinite(window.startMs)) {
@@ -337,20 +314,13 @@ export class RecurrenceEngineV2 {
     while (state.currentDate.getTime() <= window.endMs) {
       const currentMs = state.currentDate.getTime();
       if (currentMs >= window.startMs) {
-        if (dstScan) {
-          this._scanDSTTransitions(
-            dstScan,
-            state.dstTransitions,
-            Math.min(currentMs + DST_SCAN_CHUNK, window.endMs),
-            timezone
-          );
-        }
         const occurrence = this._applyOverrides(
           event,
           this.generateOccurrence(event, state.currentDate, duration, timezone, state),
           rule,
           includeCancelled,
-          includeModified
+          includeModified,
+          timezone
         );
         if (occurrence) {
           idleSteps = 0;
@@ -395,19 +365,19 @@ export class RecurrenceEngineV2 {
    * @returns {Object|null} The occurrence, or null when it is excluded
    * @private
    */
-  _applyOverrides(event, occurrence, rule, includeCancelled, includeModified) {
+  _applyOverrides(event, occurrence, rule, includeCancelled, includeModified, timezone) {
     if (!occurrence) {
       return null;
     }
-    if (this.isException(event.id, occurrence.start, rule)) {
+    if (this.isException(event.id, occurrence.start, rule, timezone)) {
       if (!includeCancelled) {
         return null;
       }
       occurrence.status = 'cancelled';
-      occurrence.cancellationReason = this.getExceptionReason(event.id, occurrence.start);
+      occurrence.cancellationReason = this.getExceptionReason(event.id, occurrence.start, timezone);
     }
     if (includeModified) {
-      const modified = this.getModifiedInstance(event.id, occurrence.start);
+      const modified = this.getModifiedInstance(event.id, occurrence.start, timezone);
       if (modified) {
         Object.assign(occurrence, modified);
         occurrence.isModified = true;
@@ -420,7 +390,7 @@ export class RecurrenceEngineV2 {
    * Move the expansion cursor to the last occurrence before the range
    * without stepping through every occurrence in between.
    *
-   * Applies to rules whose step is a fixed duration between system-timezone
+   * Applies to rules whose step is a fixed duration between recurrence-zone
    * transitions (plain DAILY and WEEKLY, HOURLY, MINUTELY, SECONDLY) and to WEEKLY
    * rules with BYDAY, whose steps repeat in a weekly cycle; the steps that
    * cross a transition are taken with getNextDate so the result is exactly
@@ -461,7 +431,8 @@ export class RecurrenceEngineV2 {
       rangeEnd.getTime(),
       stepMs,
       rule.count ? rule.count - 1 : Infinity,
-      cursor => cursor.setTime(this.getNextDate(cursor, rule, timezone, state).getTime())
+      cursor => cursor.setTime(this.getNextDate(cursor, rule, timezone, state).getTime()),
+      (from, to) => this.tzManager.getNextTransition(timezone, from, to, true)
     );
     state.currentDate = new Date(seek.ms);
     state.count = seek.steps;
@@ -473,7 +444,7 @@ export class RecurrenceEngineV2 {
    * fixed and the walk from DTSTART settles into a cycle of weekdays that
    * repeats every whole number of weeks. The cursor is stepped one
    * occurrence at a time until it is on that cycle (at most six steps),
-   * then whole cycles are skipped arithmetically between system-timezone
+   * then whole cycles are skipped arithmetically between recurrence-zone
    * transitions, exactly as seekToRange does for fixed steps.
    * @param {Object} state - Expansion state (currentDate and count are updated)
    * @param {Object} rule - Parsed recurrence rule
@@ -503,7 +474,7 @@ export class RecurrenceEngineV2 {
     // the steps before the repeat lead in to the cycle
     const path = [];
     const seen = new Map();
-    let weekday = state.currentDate.getDay();
+    let weekday = this._recurrenceDate(state.currentDate, timezone).getDay();
     while (!seen.has(weekday)) {
       seen.set(weekday, path.length);
       path.push(weekday);
@@ -539,7 +510,8 @@ export class RecurrenceEngineV2 {
         for (let i = 0; i < cycleSteps; i++) {
           cursor.setTime(this.getNextDate(cursor, rule, timezone, state).getTime());
         }
-      }
+      },
+      (from, to) => this.tzManager.getNextTransition(timezone, from, to, true)
     );
     state.currentDate = new Date(seek.ms);
     state.count += seek.steps * cycleSteps;
@@ -593,7 +565,7 @@ export class RecurrenceEngineV2 {
 
   /**
    * Milliseconds per step for rules getNextDate advances by a fixed
-   * duration while the system UTC offset is constant
+   * duration while the recurrence zone UTC offset is constant
    * @param {Object} rule - Parsed recurrence rule
    * @returns {number} Step length in milliseconds, or 0 when not fixed
    */
@@ -621,16 +593,12 @@ export class RecurrenceEngineV2 {
   /**
    * Generate a single occurrence with timezone handling
    */
-  generateOccurrence(event, date, duration, timezone, state) {
+  generateOccurrence(event, date, duration, timezone, _state) {
     const start = new Date(date);
     const end = new Date(date.getTime() + duration);
 
-    // Handle DST transitions
-    if (state.dstTransitions.length > 0) {
-      const adjusted = this.adjustForDST(start, end, timezone, state.dstTransitions);
-      start.setTime(adjusted.start.getTime());
-      end.setTime(adjusted.end.getTime());
-    }
+    // The cursor is already an instant resolved in the recurrence zone. A
+    // second DST adjustment here would shift it outside the requested window.
 
     return {
       id: `${event.id}_${start.getTime()}`,
@@ -652,15 +620,59 @@ export class RecurrenceEngineV2 {
     };
   }
 
+  /** Parse floating UNTIL/EXDATE values in the recurrence zone, not the host. @private */
+  _parseRule(input, timezone) {
+    const rule = RRuleParser.parse(input);
+    if (typeof input === 'string') {
+      for (const part of input.toUpperCase().split(';')) {
+        const [key, value] = part.split('=');
+        if (key === 'UNTIL') {
+          rule.until = this._parseRuleDate(value, timezone);
+        } else if (key === 'EXDATE') {
+          rule.exceptions = value
+            .split(',')
+            .map(date => this._parseRuleDate(date.trim(), timezone));
+        }
+      }
+    }
+    return rule;
+  }
+
+  /** @private */
+  _parseRuleDate(value, timezone) {
+    if (!/^\d{8}(T\d{6})?$/.test(value)) {
+      return RRuleParser.parseDateTime(value);
+    }
+    const wall = new Date(0);
+    wall.setUTCFullYear(+value.slice(0, 4), +value.slice(4, 6) - 1, +value.slice(6, 8));
+    wall.setUTCHours(+value.slice(9, 11), +value.slice(11, 13), +value.slice(13, 15), 0);
+    const date = new RecurrenceDate(wall, timezone);
+    date._resolve(wall.getTime());
+    return new Date(date);
+  }
+
+  /**
+   * Use native setters when the requested zone is the host zone, and an
+   * equivalent zoned cursor otherwise. Public helpers without a zone retain
+   * their local Date behavior.
+   * @private
+   */
+  _recurrenceDate(date, timezone) {
+    if (!timezone || timezone === this.systemTimezone) {
+      return new Date(date);
+    }
+    return new RecurrenceDate(date, timezone);
+  }
+
   /**
    * Get next occurrence date with complex pattern support
    */
   getNextDate(currentDate, rule, timezone, _state = {}) {
-    const next = new Date(currentDate);
+    const next = this._recurrenceDate(currentDate, timezone);
 
     switch (rule.freq) {
       case 'DAILY':
-        return this.getNextDaily(next, rule);
+        return this.getNextDaily(next, rule, timezone);
 
       case 'WEEKLY':
         return this.getNextWeekly(next, rule, timezone);
@@ -673,28 +685,28 @@ export class RecurrenceEngineV2 {
 
       case 'HOURLY':
         next.setHours(next.getHours() + rule.interval);
-        return next;
+        return new Date(next);
 
       case 'MINUTELY':
         next.setMinutes(next.getMinutes() + rule.interval);
-        return next;
+        return new Date(next);
 
       case 'SECONDLY':
         next.setSeconds(next.getSeconds() + rule.interval);
-        return next;
+        return new Date(next);
 
       default:
         // Fallback to daily
         next.setDate(next.getDate() + rule.interval);
-        return next;
+        return new Date(next);
     }
   }
 
   /**
    * Get next daily occurrence
    */
-  getNextDaily(date, rule) {
-    const next = new Date(date);
+  getNextDaily(date, rule, timezone) {
+    const next = this._recurrenceDate(date, timezone);
     next.setDate(next.getDate() + rule.interval);
 
     // Apply BYHOUR, BYMINUTE, BYSECOND if specified
@@ -710,14 +722,14 @@ export class RecurrenceEngineV2 {
       }
     }
 
-    return next;
+    return new Date(next);
   }
 
   /**
    * Get next weekly occurrence with BYDAY support
    */
-  getNextWeekly(date, rule, _timezone) {
-    const next = new Date(date);
+  getNextWeekly(date, rule, timezone) {
+    const next = this._recurrenceDate(date, timezone);
 
     if (rule.byDay && rule.byDay.length > 0) {
       // BYDAY is a set: the next weekday in it after the current one, or the
@@ -743,14 +755,14 @@ export class RecurrenceEngineV2 {
       next.setDate(next.getDate() + 7 * rule.interval);
     }
 
-    return next;
+    return new Date(next);
   }
 
   /**
    * Get next monthly occurrence with complex patterns
    */
-  getNextMonthly(date, rule, _timezone) {
-    const next = new Date(date);
+  getNextMonthly(date, rule, timezone) {
+    const next = this._recurrenceDate(date, timezone);
 
     if (rule.byMonthDay && rule.byMonthDay.length > 0) {
       // Specific day(s) of month
@@ -768,7 +780,9 @@ export class RecurrenceEngineV2 {
           // the first so the month step cannot overflow from a 31st.
           next.setDate(1);
           next.setMonth(next.getMonth() + rule.interval);
-          const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+          const lastDay = new Date(
+            Date.UTC(next.getFullYear(), next.getMonth() + 1, 0)
+          ).getUTCDate();
           next.setDate(Math.max(1, lastDay + targetDay + 1));
         } else {
           // Move to next month
@@ -799,10 +813,10 @@ export class RecurrenceEngineV2 {
       if (rule.byDay && rule.byDay.length > 0) {
         // Generate all matching weekday occurrences in the month
         const targetDays = this._weekdayTargets(rule);
-        const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+        const lastDay = new Date(Date.UTC(next.getFullYear(), next.getMonth() + 1, 0)).getUTCDate();
         for (let d = 1; d <= lastDay; d++) {
-          const date = new Date(next.getFullYear(), next.getMonth(), d);
-          if (targetDays.includes(date.getDay())) {
+          const date = new Date(Date.UTC(next.getFullYear(), next.getMonth(), d));
+          if (targetDays.includes(date.getUTCDay())) {
             candidates.push(d);
           }
         }
@@ -826,20 +840,20 @@ export class RecurrenceEngineV2 {
       next.setMonth(next.getMonth() + rule.interval);
 
       // Handle month-end edge cases
-      const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+      const lastDay = new Date(Date.UTC(next.getFullYear(), next.getMonth() + 1, 0)).getUTCDate();
       if (currentDay > lastDay) {
         next.setDate(lastDay);
       }
     }
 
-    return next;
+    return new Date(next);
   }
 
   /**
    * Get next yearly occurrence
    */
-  getNextYearly(date, rule, _timezone) {
-    const next = new Date(date);
+  getNextYearly(date, rule, timezone) {
+    const next = this._recurrenceDate(date, timezone);
 
     if (rule.byMonth && rule.byMonth.length > 0) {
       const currentMonth = next.getMonth();
@@ -877,7 +891,7 @@ export class RecurrenceEngineV2 {
       next.setFullYear(next.getFullYear() + rule.interval);
     }
 
-    return next;
+    return new Date(next);
   }
 
   /**
@@ -907,10 +921,10 @@ export class RecurrenceEngineV2 {
       date.setDate(date.getDate() + 7 * (nth - 1));
     } else {
       // Nth occurrence from end
-      const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+      const lastDay = new Date(Date.UTC(date.getFullYear(), date.getMonth() + 1, 0)).getUTCDate();
 
       // Find last occurrence
-      const temp = new Date(date);
+      const temp = this._recurrenceDate(date, date.timezone);
       temp.setDate(lastDay);
       for (let i = 0; i < 7 && temp.getDay() !== targetDay; i++) {
         temp.setDate(temp.getDate() - 1);
@@ -1010,7 +1024,8 @@ export class RecurrenceEngineV2 {
       this.modifiedInstances.set(eventId, new Map());
     }
 
-    const dateKey = this.getDateKey(occurrenceDate);
+    const dateKey = new Date(occurrenceDate).getTime();
+    this.modifiedInstances.get(eventId).delete(dateKey);
     this.modifiedInstances.get(eventId).set(dateKey, {
       ...modifications,
       modifiedAt: new Date()
@@ -1023,13 +1038,12 @@ export class RecurrenceEngineV2 {
   /**
    * Get modified instance data
    */
-  getModifiedInstance(eventId, occurrenceDate) {
+  getModifiedInstance(eventId, occurrenceDate, timezone) {
     if (!this.modifiedInstances.has(eventId)) {
       return null;
     }
 
-    const dateKey = this.getDateKey(occurrenceDate);
-    return this.modifiedInstances.get(eventId).get(dateKey);
+    return this._getDateEntry(this.modifiedInstances.get(eventId), occurrenceDate, timezone);
   }
 
   /**
@@ -1040,7 +1054,8 @@ export class RecurrenceEngineV2 {
       this.exceptionStore.set(eventId, new Map());
     }
 
-    const dateKey = this.getDateKey(date);
+    const dateKey = new Date(date).getTime();
+    this.exceptionStore.get(eventId).delete(dateKey);
     this.exceptionStore.get(eventId).set(dateKey, reason);
 
     // Clear cache
@@ -1050,12 +1065,12 @@ export class RecurrenceEngineV2 {
   /**
    * Check if date is an exception
    */
-  isException(eventId, date, rule) {
-    const dateKey = this.getDateKey(date);
+  isException(eventId, date, rule, timezone) {
+    const dateKey = this.getDateKey(date, timezone);
 
     // Check enhanced exceptions
     if (this.exceptionStore.has(eventId)) {
-      if (this.exceptionStore.get(eventId).has(dateKey)) {
+      if (this._getDateEntry(this.exceptionStore.get(eventId), date, timezone) !== undefined) {
         return true;
       }
     }
@@ -1064,7 +1079,7 @@ export class RecurrenceEngineV2 {
     if (rule && rule.exceptions) {
       return rule.exceptions.some(ex => {
         const exDate = ex instanceof Date ? ex : new Date(ex.date || ex);
-        return this.getDateKey(exDate) === dateKey;
+        return this.getDateKey(exDate, timezone) === dateKey;
       });
     }
 
@@ -1074,20 +1089,31 @@ export class RecurrenceEngineV2 {
   /**
    * Get exception reason
    */
-  getExceptionReason(eventId, date) {
+  getExceptionReason(eventId, date, timezone) {
     if (!this.exceptionStore.has(eventId)) {
       return 'Cancelled';
     }
 
-    const dateKey = this.getDateKey(date);
-    return this.exceptionStore.get(eventId).get(dateKey) || 'Cancelled';
+    return this._getDateEntry(this.exceptionStore.get(eventId), date, timezone) || 'Cancelled';
+  }
+
+  /** Resolve stored instance dates in the querying event's zone. @private */
+  _getDateEntry(entries, date, timezone) {
+    const day = this.getDateKey(date, timezone);
+    let result;
+    for (const [timestamp, value] of entries) {
+      if (this.getDateKey(new Date(timestamp), timezone) === day) {
+        result = value;
+      }
+    }
+    return result;
   }
 
   /**
    * Create date key for indexing
    */
-  getDateKey(date) {
-    const d = date instanceof Date ? date : new Date(date);
+  getDateKey(date, timezone) {
+    const d = this._recurrenceDate(date, timezone);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
@@ -1113,7 +1139,7 @@ export class RecurrenceEngineV2 {
     }
     const startMs = new Date(event.start).getTime();
     const endMs = new Date(event.end).getTime();
-    return `${key}|${startMs}|${endMs}|${this._ruleFingerprint(event.recurrenceRule)}`;
+    return `${key}|${startMs}|${endMs}|${event.timeZone || 'UTC'}|${this._ruleFingerprint(event.recurrenceRule)}`;
   }
 
   /**
