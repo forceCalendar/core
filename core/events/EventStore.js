@@ -18,6 +18,7 @@ const TIMEZONE_PAD_DAYS = 2;
  */
 export class EventStore {
   constructor(config = {}) {
+    this._destroyed = false;
     // Primary storage - Map for O(1) ID lookups
     /** @type {Map<string, Event>} */
     this.events = new Map();
@@ -1824,6 +1825,9 @@ export class EventStore {
    * Destroy the store and clean up resources
    */
   destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+
     this.clear();
     this.optimizer.destroy();
     this.listeners.clear();

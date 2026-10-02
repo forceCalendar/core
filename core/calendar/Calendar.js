@@ -8,6 +8,7 @@ import { TimezoneManager } from '../timezone/TimezoneManager.js';
  * Calendar - Main calendar class with full timezone support
  * Pure JavaScript, no DOM dependencies
  * Framework agnostic, Locker Service compatible
+ * @template {import('../types.js').ExpandedOccurrence} [TOccurrence=never] - Additional occurrence objects returned by subclasses
  */
 export class Calendar {
   /**
@@ -15,6 +16,7 @@ export class Calendar {
    * @param {import('../types.js').CalendarConfig} [config={}] - Configuration options
    */
   constructor(config = {}) {
+    this._destroyed = false;
     // Initialize timezone manager first (use singleton to share cache)
     this.timezoneManager = TimezoneManager.getInstance();
 
@@ -425,7 +427,7 @@ export class Calendar {
    * @param {Date} start - Start date
    * @param {Date} end - End date
    * @param {string} [timezone] - Timezone for the query (defaults to calendar timezone)
-   * @returns {Event[]}
+   * @returns {(Event|TOccurrence)[]}
    */
   getEventsInRange(start, end, timezone = null) {
     return this.eventStore.getEventsInRange(start, end, true, timezone || this.config.timeZone);
@@ -959,12 +961,12 @@ export class Calendar {
    */
   _setupInternalListeners() {
     // Listen to state changes
-    this.state.subscribe((newState, oldState) => {
+    this._unsubscribeState = this.state.subscribe((newState, oldState) => {
       this._emit('stateChange', { newState, oldState });
     });
 
     // Listen to event store changes
-    this.eventStore.subscribe(change => {
+    this._unsubscribeEventStore = this.eventStore.subscribe(change => {
       this._emit('eventStoreChange', change);
     });
   }
@@ -991,11 +993,16 @@ export class Calendar {
    * Destroy the calendar and clean up
    */
   destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+
     // Emit destroy event before clearing listeners
     this._emit('destroy');
 
     // Clear all listeners
     this.listeners.clear();
+    this._unsubscribeState();
+    this._unsubscribeEventStore();
 
     // Properly destroy EventStore (clears events, caches, and cleanup timers)
     this.eventStore.destroy();

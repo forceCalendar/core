@@ -5,6 +5,7 @@
 
 export class AdaptiveMemoryManager {
   constructor(config = {}) {
+    this._destroyed = false;
     this.config = {
       checkInterval: 30000, // Check memory every 30 seconds
       memoryThreshold: 0.8, // Start reducing cache at 80% memory usage
@@ -64,7 +65,7 @@ export class AdaptiveMemoryManager {
    * Start memory monitoring
    */
   startMonitoring() {
-    if (this.monitoringInterval) {
+    if (this._destroyed || this.monitoringInterval !== null) {
       return;
     }
 
@@ -84,7 +85,7 @@ export class AdaptiveMemoryManager {
    * Stop memory monitoring
    */
   stopMonitoring() {
-    if (this.monitoringInterval) {
+    if (this.monitoringInterval !== null) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
     }
@@ -94,7 +95,11 @@ export class AdaptiveMemoryManager {
    * Check memory pressure and adjust caches
    */
   async checkMemoryPressure() {
+    if (this._destroyed) return;
+
     const memoryUsage = await this.getMemoryUsage();
+    // A memory read may finish after the owner has been destroyed.
+    if (this._destroyed) return;
     this.stats.lastMemoryUsage = memoryUsage;
     this.stats.lastCheckTime = new Date();
 
@@ -336,6 +341,7 @@ export class AdaptiveMemoryManager {
    * Destroy manager and clean up
    */
   destroy() {
+    this._destroyed = true;
     this.stopMonitoring();
     this.caches.clear();
   }

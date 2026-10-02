@@ -410,6 +410,20 @@
  */
 
 /**
+ * Plain recurrence object returned alongside stored Events by EnhancedCalendar.
+ * @typedef {ExpandedOccurrence & {isOccurrence: true, occurrenceStart: Date}} EnhancedCalendarOccurrence
+ */
+
+/**
+ * @typedef {Object} EnhancedRangeOptions
+ * @property {number} [maxOccurrences=365] - Maximum occurrences expanded per series
+ * @property {boolean} [includeModified=true] - Apply stored instance modifications
+ * @property {boolean} [includeCancelled=false] - Include cancelled occurrences
+ * @property {string} [timezone] - Timezone for expansion (defaults to the event's)
+ * @property {boolean} [handleDST=true] - Adjust occurrences across DST transitions
+ */
+
+/**
  * @typedef {Object} CalendarPlugin
  * @property {(calendar: import('./calendar/Calendar.js').Calendar) => void} install - Installation function
  * @property {(calendar: import('./calendar/Calendar.js').Calendar) => void} [uninstall] - Cleanup function
